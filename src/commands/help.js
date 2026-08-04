@@ -4,7 +4,8 @@ export async function helpCommand(ctx) {
 
 **Wallet & Portfolio:**
 • /balance - Check your crypto portfolio across all chains
-• /transfer - Send crypto to another wallet
+• /pay - Send crypto to a user or address
+• /transfer - Send crypto to another wallet (legacy)
 • /sign - Sign a message with your wallet
 
 **Services & Payments:**
@@ -23,7 +24,8 @@ export async function helpCommand(ctx) {
 **Examples:**
 
 \`/balance\` - Shows your portfolio
-\`/transfer 0x123... 1.5 ETH\` - Send 1.5 ETH to address
+\`/pay @user 1.5 ETH\` - Send 1.5 ETH to a user
+\`/pay 0x123... 10 SOL\` - Send 10 SOL to address
 \`/sign hello world\` - Sign the message "hello world"
 \`/services flights\` - Search for flight booking services
 

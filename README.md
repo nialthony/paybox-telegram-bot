@@ -5,45 +5,71 @@ A powerful Telegram bot that brings Web3 payments, crypto transfers, and decentr
 ## 🎯 Features
 
 ### Wallet & Portfolio Management
-- **Check Portfolio**: View your crypto holdings across EVM and Solana chains
-- **Transfer Crypto**: Send ETH, SOL, and tokens to other wallets
-- **Sign Messages**: Sign messages and transactions with your wallet
-- **Balance Verification**: Verify Solana balances with transaction signatures
+- **Check Portfolio**: View your crypto holdings across EVM and Solana chains.
+- **Pay Users**: Send ETH, SOL, and tokens to other Telegram users using `/pay @user`.
+- **Crypto Transfers**: Send funds directly to any wallet address.
+- **Sign Messages**: Sign messages and transactions securely with your wallet.
+- **Setup Validation**: Intelligent checks to ensure users have connected their Paybox account before transacting.
 
 ### x402 Services Integration
 Access premium services directly from Telegram:
-- **✈️ Flights**: Book flights via Brij
-- **🛒 Shopping**: Buy from Amazon via Purch
-- **📧 Email**: Access Agentmail inbox
-- **📊 Data**: Real-time market data and web scraping via Glim.sh
-- **📱 SMS**: Send SMS messages
-- **📄 Documents**: Parse and extract data from documents
-- **👥 Contacts**: Enrich contact information
-
-### Prediction Markets
-- Browse World prediction markets
-- Trade prediction outcomes
-- Monitor positions and P&L
-- Real-time market data and orderbook
+- **✈️ Flights**: Book flights via Brij.
+- **🛒 Shopping**: Buy from Amazon via Purch.
+- **📧 Email**: Access Agentmail inbox.
+- **📊 Data**: Real-time market data and web scraping via Glim.sh.
+- **📱 SMS**: Send SMS messages.
+- **📄 Documents**: Parse and extract data from documents.
 
 ### Security
-- **Non-custodial**: Your private keys never leave your device
-- **Passkey Approval**: Sensitive operations require your passkey
-- **Audit Trail**: All operations are logged
-- **Scoped Access**: Agents get limited, scoped credentials
+- **Non-custodial**: Your private keys never leave your device.
+- **Passkey Approval**: Sensitive operations require your passkey via Paybox.
+- **Audit Trail**: All operations are logged for transparency.
+- **Scoped Access**: The bot only sees what you explicitly grant.
+
+---
+
+## 🗺️ Project Roadmap & Phases
+
+To make this bot the ultimate Web3 companion on Telegram, we follow a structured development roadmap:
+
+### Phase 1: Foundation (Current)
+- [x] Integration with @paybox-sh/sdk.
+- [x] Portfolio balance checking across multiple chains.
+- [x] Basic `/pay` and `/transfer` functionality.
+- [x] Message signing capabilities.
+- [x] x402 service discovery.
+
+### Phase 2: Enhanced User Experience (Next)
+- [ ] **User Registry**: Database integration to map Telegram handles to wallet addresses.
+- [ ] **Inline Keyboards**: Quick actions for common tasks (e.g., "Pay Back", "View Tx").
+- [ ] **Real-time Notifications**: Instant alerts when a payment is received or a request is approved.
+- [ ] **Multi-currency Support**: Automatic price conversion for common tokens.
+
+### Phase 3: Autonomous Agents & Automation
+- [ ] **Scheduled Payments**: Set up recurring transfers or subscription payments.
+- [ ] **Trading Agents**: Deploy AI agents that trade on prediction markets based on your custom signals.
+- [ ] **Smart Alerts**: Get notified of portfolio changes or market opportunities.
+
+### Phase 4: Ecosystem Expansion
+- [ ] **Group Chat Features**: Split bills and group expenses within Telegram groups.
+- [ ] **Merchant Tools**: Allow businesses to accept Paybox payments via Telegram bots.
+- [ ] **White-label SDK**: A framework for other developers to build their own Paybox-powered Telegram bots.
+
+---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 - Node.js 18+
 - A Telegram Bot Token (from [@BotFather](https://t.me/botfather))
-- A Paybox account (https://app.paybox.sh)
+- A Paybox account ([app.paybox.sh](https://app.paybox.sh))
 - Paybox API key
 
 ### Installation
 
-1. **Clone or download this repository**
+1. **Clone the repository**
    ```bash
+   git clone https://github.com/nialthony/paybox-telegram-bot.git
    cd paybox-telegram-bot
    ```
 
@@ -56,151 +82,21 @@ Access premium services directly from Telegram:
    ```bash
    cp .env.example .env
    ```
-
-   Edit `.env` and add:
-   - `TELEGRAM_BOT_TOKEN`: Your Telegram bot token
-   - `PAYBOX_API_KEY`: Your Paybox API key
-   - `PAYBOX_SIGNING_KEY`: (Optional) Your Paybox signing key for autonomous operations
+   Edit `.env` and add your `TELEGRAM_BOT_TOKEN` and `PAYBOX_API_KEY`.
 
 4. **Start the bot**
    ```bash
    npm start
    ```
 
-   For development with auto-reload:
-   ```bash
-   npm run dev
-   ```
-
 ## 📱 Usage
-
-### Available Commands
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `/start` | Show welcome message | `/start` |
-| `/help` | Show all available commands | `/help` |
+| `/pay` | Send crypto to a user or address | `/pay @user 1.5 ETH` |
 | `/balance` | Check your crypto portfolio | `/balance` |
-| `/transfer` | Send crypto to another wallet | `/transfer 0x123... 1.5 ETH` |
-| `/sign` | Sign a message with your wallet | `/sign hello world` |
 | `/services` | Browse x402 services | `/services flights` |
-| `/email` | Access your email inbox | `/email` |
-| `/markets` | Browse prediction markets | `/markets` |
-
-### Examples
-
-**Check your portfolio:**
-```
-/balance
-```
-
-**Send 1.5 ETH to an address:**
-```
-/transfer 0x742d35Cc6634C0532925a3b844Bc9e7595f2bEb 1.5 ETH
-```
-
-**Sign a message:**
-```
-/sign gm frens
-```
-
-**Book a flight:**
-```
-/services flights
-```
-
-**Access your email:**
-```
-/email
-```
-
-## 🏗️ Architecture
-
-### Project Structure
-```
-paybox-telegram-bot/
-├── src/
-│   ├── index.js           # Main bot entry point
-│   ├── middleware/
-│   │   └── index.js       # Middleware setup
-│   └── commands/
-│       ├── index.js       # Command registration
-│       ├── start.js       # Start command
-│       ├── help.js        # Help command
-│       ├── balance.js     # Portfolio balance
-│       ├── transfer.js    # Crypto transfer
-│       ├── sign.js        # Message signing
-│       └── services.js    # x402 services
-├── .env.example           # Environment variables template
-├── package.json           # Dependencies
-└── README.md             # This file
-```
-
-### Key Technologies
-- **Telegraf**: Telegram bot framework
-- **Paybox SDK**: Non-custodial wallet integration
-- **Node.js**: Runtime environment
-
-## 🔐 Security Considerations
-
-1. **Private Keys**: Never stored in the bot. All signing happens in Paybox.
-2. **Passkey Approval**: Sensitive operations require user approval via passkey.
-3. **Scoped Credentials**: The bot only gets access to what the user explicitly grants.
-4. **Audit Trail**: All operations are logged in Paybox for transparency.
-5. **Environment Variables**: Keep your API keys secure in `.env` file.
-
-## 🌟 Why This Bot is "Crazy" (In a Good Way)
-
-1. **First Telegram + Paybox Integration**: Brings Web3 to the world's most popular messaging app
-2. **Non-Custodial by Default**: Users maintain full control of their assets
-3. **x402 Services**: Unique access to premium services (flights, shopping, data, etc.)
-4. **Prediction Markets**: Trade prediction outcomes directly from Telegram
-5. **Seamless UX**: Complex Web3 operations simplified for mainstream users
-
-## 🚀 Future Enhancements
-
-- [ ] Inline keyboard for quick actions
-- [ ] Webhook support for scalability
-- [ ] Redis session persistence
-- [ ] Multi-language support
-- [ ] Advanced trading features
-- [ ] Portfolio analytics and charts
-- [ ] Scheduled transfers and payments
-- [ ] Group chat support
-- [ ] Tip/payment splitting
-- [ ] Integration with other Web3 services
-
-## 📚 Documentation
-
-- [Paybox Docs](https://docs.paybox.sh) - Complete Paybox documentation
-- [Telegraf Docs](https://telegraf.js.org) - Telegram bot framework
-- [x402 Services](https://docs.paybox.sh/reference/mcp-tools#discover_services) - Available premium services
-
-## 🤝 Contributing
-
-This is a demo project showcasing Paybox capabilities. Feel free to:
-- Fork and extend with new features
-- Submit issues and suggestions
-- Create pull requests
-- Share your use cases
-
-## 📄 License
-
-MIT License - Feel free to use and modify
-
-## 🎓 Learning Resources
-
-- [Paybox Getting Started](https://docs.paybox.sh/getting-started)
-- [MCP Tools Reference](https://docs.paybox.sh/reference/mcp-tools)
-- [OAuth 2.1 Integration](https://docs.paybox.sh/connect/oauth)
-- [SDK & CLI Guide](https://docs.paybox.sh/sdk-cli)
-
-## 💬 Support
-
-For issues related to:
-- **Paybox**: Visit https://docs.paybox.sh or contact Paybox team
-- **Telegram Bot**: Check Telegraf documentation or create an issue
-- **This Bot**: Create an issue on GitHub
+| `/sign` | Sign a message | `/sign gm frens` |
 
 ---
 

@@ -1,6 +1,7 @@
 import { startCommand } from './start.js';
 import { balanceCommand } from './balance.js';
 import { transferCommand } from './transfer.js';
+import { payCommand } from './pay.js';
 import { signCommand } from './sign.js';
 import { servicesCommand } from './services.js';
 import { helpCommand } from './help.js';
@@ -17,6 +18,9 @@ export function setupCommands(bot) {
 
   // Transfer command
   bot.command('transfer', transferCommand);
+
+  // Pay command
+  bot.command('pay', payCommand);
 
   // Sign command
   bot.command('sign', signCommand);
