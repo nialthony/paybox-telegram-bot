@@ -55,7 +55,15 @@ Every single action taken by the bot is recorded in the Paybox **Audit Log**. Yo
 
 Since Paybox is a non-custodial wallet for AI agents, you can use the same Paybox account to power tools like **Claude Code**, **Claude Desktop**, and **ChatGPT**. This Telegram bot acts as your mobile interface, while these tools act as your developer interface.
 
-### 1. Integrating with Claude (Desktop & Code)
+### 1. AI Agent Mode (Inside this Bot)
+This bot now features a **Natural Language Mode** powered by LLMs (like GPT-4 or Claude). Instead of typing commands, you can just chat:
+- *"How much money do I have?"* -> Triggers `/balance`
+- *"Send 10 bucks to @friend in SOL"* -> Triggers `/pay @friend 10 SOL`
+- *"I want to book a flight to Tokyo"* -> Triggers `/services flights`
+
+To enable this, add your `OPENAI_API_KEY` to the `.env` file.
+
+### 2. Integrating with Claude (Desktop & Code)
 Paybox speaks the **Model Context Protocol (MCP)**. You can add Paybox as a custom connector.
 
 **Steps for Claude Desktop:**
@@ -80,7 +88,7 @@ Add the Paybox MCP server to your `claude_desktop_config.json` (or your specific
 }
 ```
 
-### 2. Integrating with ChatGPT (Custom GPTs)
+### 3. Integrating with ChatGPT (Custom GPTs & Codex)
 You can create a Custom GPT that uses Paybox as an Action.
 
 1. Create a new **GPT** in ChatGPT.
@@ -91,7 +99,7 @@ You can create a Custom GPT that uses Paybox as an Action.
    - **Token URL**: `https://api.paybox.sh/oauth/token`
 5. Now your GPT can handle payments and check balances on your behalf!
 
-### 3. How they work together
+### 4. How they work together
 - **Telegram Bot**: Use it for quick checks, mobile payments, and notifications while on the go.
 - **Claude/ChatGPT**: Use them for complex financial analysis, automated trading scripts, or building Web3 apps.
 - **Unified Identity**: All tools share the same Paybox identity and security settings (Passkey, Scoped Grants, Audit Log).

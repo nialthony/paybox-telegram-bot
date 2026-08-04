@@ -3,10 +3,15 @@ import { PayboxClient } from '@paybox-sh/sdk';
 import dotenv from 'dotenv';
 import { setupCommands } from './commands/index.js';
 import { setupMiddleware } from './middleware/index.js';
+import { PayboxAgent } from './agent/index.js';
 
 dotenv.config();
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+
+// Initialize AI Agent
+const agent = new PayboxAgent(process.env.OPENAI_API_KEY);
+bot.context.agent = agent;
 
 // Initialize Paybox client
 const paybox = PayboxClient.fromConfig({

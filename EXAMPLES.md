@@ -1,6 +1,52 @@
 # 📱 Usage Examples & Bot Interactions
 
-This document showcases how users interact with the **Paybox Telegram Bot** and what the responses look like.
+This document showcases how users interact with the **Paybox Telegram Bot**, including the new **AI Agent Mode** (Natural Language).
+
+---
+
+### 🤖 AI Agent Mode (Natural Language)
+Instead of using `/commands`, you can just chat with the bot like a human.
+
+**User:** "Hey, check my total balance across all wallets"
+
+**Bot:**
+> 🧠 Thinking...
+> 
+> I'll check your total portfolio value for you.
+> 
+> 🔄 Executing: `/balance`
+>
+> 💰 **Your Portfolio**
+> **Total Value:** $1,245.50 USD
+> ...
+
+**User:** "Send 50 USDC to @friend on Solana"
+
+**Bot:**
+> 🧠 Thinking...
+> 
+> Sure, I'll prepare a payment of 50 USDC to @friend.
+> 
+> 🔄 Executing: `/pay @friend 50 USDC`
+>
+> 🔍 Resolving user @friend...
+> ⏳ **Initiating Payment**
+> ...
+
+**User:** "I need to book a cheap flight to Bali"
+
+**Bot:**
+> 🧠 Thinking...
+> 
+> I can help you with that! Searching for flight booking services.
+> 
+> 🔄 Executing: `/services flights`
+>
+> ✈️ **Available Services**
+> **Brij Flights** - ~$150.00
+> ...
+
+---
 
 ---
 
