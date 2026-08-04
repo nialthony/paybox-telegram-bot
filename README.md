@@ -51,6 +51,53 @@ Every single action taken by the bot is recorded in the Paybox **Audit Log**. Yo
 
 ---
 
+## 🤖 AI Agent Integration Tutorial
+
+Since Paybox is a non-custodial wallet for AI agents, you can use the same Paybox account to power tools like **Claude Code**, **Claude Desktop**, and **ChatGPT**. This Telegram bot acts as your mobile interface, while these tools act as your developer interface.
+
+### 1. Integrating with Claude (Desktop & Code)
+Paybox speaks the **Model Context Protocol (MCP)**. You can add Paybox as a custom connector.
+
+**Steps for Claude Desktop:**
+1. Open Claude Desktop and go to `Settings` -> `Customize` -> `Connectors`.
+2. Click **Add Connector** and paste the Paybox MCP URL:
+   ```
+   https://api.paybox.sh/mcp
+   ```
+3. Sign in with your Passkey when prompted and approve the grant.
+4. Now you can ask Claude: *"Check my Paybox portfolio"* or *"Send 0.1 ETH to 0x..."*.
+
+**Steps for Claude Code (CLI):**
+Add the Paybox MCP server to your `claude_desktop_config.json` (or your specific tool config):
+```json
+{
+  "mcpServers": {
+    "paybox": {
+      "command": "npx",
+      "args": ["-y", "@paybox-sh/sdk", "mcp"]
+    }
+  }
+}
+```
+
+### 2. Integrating with ChatGPT (Custom GPTs)
+You can create a Custom GPT that uses Paybox as an Action.
+
+1. Create a new **GPT** in ChatGPT.
+2. Go to **Configure** -> **Create new action**.
+3. Import from URL using the Paybox OpenAPI spec (found in [Paybox Docs](https://docs.paybox.sh/api-reference)).
+4. Set up **OAuth 2.1** authentication using the endpoints:
+   - **Authorize URL**: `https://api.paybox.sh/oauth/authorize`
+   - **Token URL**: `https://api.paybox.sh/oauth/token`
+5. Now your GPT can handle payments and check balances on your behalf!
+
+### 3. How they work together
+- **Telegram Bot**: Use it for quick checks, mobile payments, and notifications while on the go.
+- **Claude/ChatGPT**: Use them for complex financial analysis, automated trading scripts, or building Web3 apps.
+- **Unified Identity**: All tools share the same Paybox identity and security settings (Passkey, Scoped Grants, Audit Log).
+
+---
+
 ## 🗺️ Project Roadmap & Phases
 
 To make this bot the ultimate Web3 companion on Telegram, we follow a structured development roadmap:
