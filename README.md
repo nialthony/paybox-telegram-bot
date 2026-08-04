@@ -82,7 +82,10 @@ To make this bot the ultimate Web3 companion on Telegram, we follow a structured
    ```bash
    cp .env.example .env
    ```
-   Edit `.env` and add your `TELEGRAM_BOT_TOKEN` and `PAYBOX_API_KEY`.
+   Edit `.env` and add:
+   - `TELEGRAM_BOT_TOKEN`: Your token from @BotFather.
+   - `PAYBOX_API_KEY`: The **Auth Token** from Paybox (starts with `pbx_live_`).
+   - `PAYBOX_SIGNING_KEY`: The **Signing Key** from Paybox (starts with `pbxk1_`, optional but recommended).
 
 4. **Start the bot**
    ```bash
