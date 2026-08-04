@@ -1,0 +1,28 @@
+{
+  "name": "paybox-telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot powered by Paybox - Web3 payments in Telegram",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "paybox",
+    "crypto",
+    "web3",
+    "wallet",
+    "payments"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "telegraf": "^4.15.0",
+    "@paybox-sh/sdk": "^0.1.0",
+    "dotenv": "^16.3.1",
+    "axios": "^1.6.0"
+  }
+}
