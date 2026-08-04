@@ -126,6 +126,11 @@ To make this bot the ultimate Web3 companion on Telegram, we follow a structured
 
 ---
 
+### 📖 Detailed Examples
+Check out [EXAMPLES.md](./EXAMPLES.md) to see full simulated bot interactions and responses.
+
+---
+
 **Made with ❤️ to showcase the power of Paybox + Telegram**
 
 🔗 [Paybox](https://paybox.sh) | 🤖 [Telegraf](https://telegraf.js.org) | 💬 [Telegram](https://telegram.org)
