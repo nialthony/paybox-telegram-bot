@@ -20,11 +20,34 @@ Access premium services directly from Telegram:
 - **📱 SMS**: Send SMS messages.
 - **📄 Documents**: Parse and extract data from documents.
 
-### Security
-- **Non-custodial**: Your private keys never leave your device.
-- **Passkey Approval**: Sensitive operations require your passkey via Paybox.
-- **Audit Trail**: All operations are logged for transparency.
-- **Scoped Access**: The bot only sees what you explicitly grant.
+## 🔐 Security Analysis
+
+This project is designed with a **Security-First** approach, leveraging the robust architecture of Paybox.
+
+### 1. Non-Custodial Architecture
+The bot **never** has access to your raw private keys or credit card numbers. All signing operations occur within the MoonX MPC (Multi-Party Computation) environment. The bot only receives a "scoped output" (a signature or a one-time virtual card).
+
+### 2. Passkey-Gated Approvals
+Even if the bot is compromised, it cannot move significant funds without your explicit consent. Any operation above your set threshold will pause and wait for your **Passkey approval** on your personal device.
+
+### 3. Scoped Grants & Limits
+You stay in control by setting specific grants for the bot:
+- **Amount Limits**: Restrict how much the bot can spend per transaction or per day.
+- **Credential Access**: Grant access only to specific wallets or cards, not your entire portfolio.
+- **Autonomous vs. Approval**: Choose which operations need a passkey and which can be autonomous.
+
+### 4. Secure Credential Handling
+- **Environment Variables**: Sensitive keys (Auth Token, Signing Key) are stored in a `.env` file, which is excluded from version control via `.gitignore`.
+- **In-Process Signing**: When using a Signing Key, the SDK performs signing in-process, ensuring that the MoonX secret never leaves the secure boundary.
+
+### 5. Auditability
+Every single action taken by the bot is recorded in the Paybox **Audit Log**. You can review every request, approval, and transaction hash at any time in the Paybox dashboard.
+
+### 🛑 Important Safety Tips
+- **Never share your .env file** or commit it to GitHub.
+- **Set strict limits** in the Paybox dashboard for the "Tele" agent.
+- **Regularly review the Audit Log** to monitor bot activity.
+- **Revoke access immediately** in the Paybox dashboard if you suspect any unusual behavior.
 
 ---
 
