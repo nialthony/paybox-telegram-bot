@@ -4,42 +4,44 @@ import dotenv from 'dotenv';
 import { setupCommands } from './commands/index.js';
 import { setupMiddleware } from './middleware/index.js';
 import { PayboxAgent } from './agent/index.js';
+import { loadConfig } from './config.js';
+import { PaymentIntentStore } from './services/payment-intents.js';
+import { createWalletTransferGateway } from './services/wallet-transfer-gateway.js';
+import { reportError } from './lib/errors.js';
 
 dotenv.config();
 
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
-
-// Initialize AI Agent
-const agent = new PayboxAgent(process.env.OPENAI_API_KEY);
-bot.context.agent = agent;
-
-// Initialize Paybox client
+const config = loadConfig();
+const bot = new Telegraf(config.telegramBotToken);
 const paybox = PayboxClient.fromConfig({
-  apiKey: process.env.PAYBOX_API_KEY,
-  signingKey: process.env.PAYBOX_SIGNING_KEY,
+  apiKey: config.payboxApiKey,
+  signingKey: config.payboxSigningKey,
 });
 
-// Attach paybox to bot context
 bot.context.paybox = paybox;
+bot.context.agent = new PayboxAgent(config.openAiApiKey, { model: config.openAiModel });
+bot.context.paymentIntents = new PaymentIntentStore();
+bot.context.transferGateway = createWalletTransferGateway({
+  paybox,
+  enabled: config.walletTransfersEnabled,
+});
 
-// Setup middleware
 setupMiddleware(bot);
-
-// Setup commands
 setupCommands(bot);
 
-// Error handling
-bot.catch((err, ctx) => {
-  console.error('Bot error:', err);
-  ctx.reply('❌ An error occurred. Please try again later.').catch(() => {});
+bot.catch(async (error, ctx) => {
+  const referenceId = reportError({
+    scope: 'bot_update',
+    error,
+    context: { telegramUserId: ctx.from?.id, chatId: ctx.chat?.id, updateType: ctx.updateType },
+  });
+  await ctx.reply(`❌ We could not process that update. Reference: \`${referenceId}\``, { parse_mode: 'Markdown' }).catch(() => {});
 });
 
-// Start bot
-bot.launch();
+bot.launch({ allowedUpdates: ['message', 'callback_query'] });
 
-console.log('🤖 Paybox Telegram Bot started!');
-console.log('📱 Bot is ready to receive messages');
+console.log('Paybox Telegram Bot started.');
+console.log(`Wallet transfer requests: ${config.walletTransfersEnabled ? 'enabled' : 'disabled'}`);
 
-// Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

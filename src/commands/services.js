@@ -1,71 +1,42 @@
+import { escapeMarkdown, reportError, replyWithSafeError } from '../lib/errors.js';
+
+function serviceLabel(resource) {
+  try {
+    return new URL(resource).hostname;
+  } catch {
+    return resource || 'Unnamed service';
+  }
+}
+
 export async function servicesCommand(ctx) {
-  const query = ctx.message.text.split(' ').slice(1).join(' ');
+  const query = ctx.message?.text?.split(' ').slice(1).join(' ').trim();
 
   try {
-    await ctx.reply('🔍 Searching for services...');
+    await ctx.reply('🔍 Searching available services...');
+    const services = await ctx.paybox.discoverServices(query || undefined);
 
-    // Discover services
-    const services = await ctx.paybox.discoverServices({
-      query: query || undefined,
-      limit: 10,
-    });
-
-    if (!services.services || services.services.length === 0) {
+    if (!Array.isArray(services) || !services.length) {
       await ctx.reply(
-        `❌ No services found${query ? ` for "${query}"` : ''}.\n\n` +
-        'Available service categories:\n' +
-        '• flights - Book flights (Brij)\n' +
-        '• amazon - Buy from Amazon (Purch)\n' +
-        '• email - Email inbox (Agentmail)\n' +
-        '• data - Market & web data (Glim.sh)\n' +
-        '• sms - Send SMS\n' +
-        '• documents - Parse documents\n' +
-        '• contacts - Enrich contact info'
+        `No services found${query ? ` for “${escapeMarkdown(query)}”` : ''}. Try a category such as flights, shopping, email, data, SMS, or documents.`,
       );
       return;
     }
 
-    let message = `✈️ **Available Services**\n\n`;
-
-    for (const service of services.services) {
-      const name = service.name || 'Unknown Service';
-      const description = service.description || 'No description';
-      const price = service.price_hint ? ` - ~$${service.price_hint}` : '';
-
-      message += `**${name}**${price}\n`;
-      message += `${description.substring(0, 100)}...\n\n`;
+    const lines = ['✈️ *Available services*', ''];
+    for (const service of services.slice(0, 10)) {
+      const name = escapeMarkdown(serviceLabel(service.resource));
+      const description = escapeMarkdown(String(service.description || 'No description').slice(0, 160));
+      lines.push(`*${name}*`, description, '');
     }
 
-    message += `_Use /use_service <service_name> to use a service_`;
-
-    await ctx.reply(message, {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '✈️ Flights', callback_data: 'service_flights' },
-            { text: '🛒 Amazon', callback_data: 'service_amazon' },
-          ],
-          [
-            { text: '📧 Email', callback_data: 'service_email' },
-            { text: '📊 Data', callback_data: 'service_data' },
-          ],
-        ],
-      },
-    });
+    lines.push('Service checkout is not enabled in this bot yet. This view is discovery-only.');
+    await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
   } catch (error) {
-    console.error('Services error:', error);
-    await ctx.reply(
-      `❌ Error discovering services: ${error.message}\n\n` +
-      'Available x402 services include:\n' +
-      '• ✈️ **Flights** - Book flights via Brij\n' +
-      '• 🛒 **Amazon** - Buy products via Purch\n' +
-      '• 📧 **Email** - Agentmail inbox\n' +
-      '• 📊 **Data** - Market data, web scraping via Glim.sh\n' +
-      '• 📱 **SMS** - Send SMS messages\n' +
-      '• 📄 **Documents** - Parse and extract data\n' +
-      '• 👥 **Contacts** - Enrich contact information\n\n' +
-      'Try: /services flights'
-    );
+    const referenceId = reportError({
+      scope: 'service_discovery',
+      error,
+      context: { telegramUserId: ctx.from?.id, chatId: ctx.chat?.id },
+    });
+    await replyWithSafeError(ctx, { referenceId, message: 'We could not retrieve services.' });
   }
 }

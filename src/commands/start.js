@@ -1,37 +1,25 @@
 export async function startCommand(ctx) {
   const welcomeMessage = `
-🎉 Welcome to **Paybox Telegram Bot**!
+🎉 Welcome to *Paybox Telegram Bot*
 
-I'm your gateway to Web3 payments, crypto transfers, and decentralized services - all from Telegram.
+This bot currently helps you:
+• Check a Paybox portfolio with /balance
+• Create a validated payment draft with /pay
+• Request a wallet signature with /sign
+• Discover x402 services with /services
 
-**What I can do:**
-• 💰 Check your crypto portfolio balance
-• 🔄 Transfer crypto to friends
-• ✍️ Sign messages with your wallet
-• ✈️ Book flights, buy from Amazon, and more via x402 services
-• 📊 Trade prediction markets
-• 📧 Access your email inbox
+*Current safety model*
+Payments are always presented as a draft first. The bot does not create payment requests from natural-language messages. Wallet transfers remain disabled until the installed Paybox transfer adapter is verified and production controls are configured.
 
-**Get started:**
-Use /help to see all available commands or /balance to check your portfolio.
-
-**Security:**
-All operations require your Paybox approval. Your private keys never leave your device.
+Use /help to see the supported commands.
   `.trim();
 
   await ctx.reply(welcomeMessage, {
     parse_mode: 'Markdown',
     reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '📖 Help', callback_data: 'help' },
-          { text: '💰 Balance', callback_data: 'balance' },
-        ],
-        [
-          { text: '🔗 Paybox Docs', url: 'https://docs.paybox.sh' },
-          { text: '⭐ GitHub', url: 'https://github.com/moonpay/paybox' },
-        ],
-      ],
+      inline_keyboard: [[
+        { text: 'Paybox documentation', url: 'https://docs.paybox.sh' },
+      ]],
     },
   });
 }
