@@ -1,191 +1,157 @@
-# 🤖 Paybox Telegram Bot
+# Paybox Telegram Bot
 
-A powerful Telegram bot that brings Web3 payments, crypto transfers, and decentralized services directly to Telegram. Powered by **Paybox** - the non-custodial wallet for AI agents.
+A Telegram companion for **read-only portfolio checks**, **validated payment drafts**, **message-signing guidance**, and **x402 service discovery**. The bot is designed around Paybox credentials and approvals, but it deliberately keeps high-risk wallet transfers disabled until the installed SDK contract has been independently verified in a controlled environment.
 
-## 🎯 Features
+> **Current release posture: hardened prototype.** The repository now has safe payment parsing, recipient validation, explicit Telegram confirmation controls, AI draft-only behavior, rate limiting, redacted errors, and a test baseline. It is **not approved for mainnet wallet transfers** until the transfer adapter, persistent state, webhook handling, and external security review are complete.
 
-### Wallet & Portfolio Management
-- **Check Portfolio**: View your crypto holdings across EVM and Solana chains.
-- **Pay Users**: Send ETH, SOL, and tokens to other Telegram users using `/pay @user`.
-- **Crypto Transfers**: Send funds directly to any wallet address.
-- **Sign Messages**: Sign messages and transactions securely with your wallet.
-- **Setup Validation**: Intelligent checks to ensure users have connected their Paybox account before transacting.
+## What is available now
 
-### x402 Services Integration
-Access premium services directly from Telegram:
-- **✈️ Flights**: Book flights via Brij.
-- **🛒 Shopping**: Buy from Amazon via Purch.
-- **📧 Email**: Access Agentmail inbox.
-- **📊 Data**: Real-time market data and web scraping via Glim.sh.
-- **📱 SMS**: Send SMS messages.
-- **📄 Documents**: Parse and extract data from documents.
+| Capability | Status | Notes |
+|---|---|---|
+| `/balance [wallet_address]` | Available | Read-only portfolio view through Paybox; provide an address if Paybox credential metadata does not expose one. |
+| `/pay <wallet_address> <amount> <ETH|SOL>` | Draft available | Validates address, amount, and asset; shows a user-owned confirmation card. |
+| `/transfer` | Legacy alias | Uses the same draft flow as `/pay`; no duplicate transfer implementation remains. |
+| Wallet-transfer request creation | Disabled by default | Requires explicit adapter confirmation and controlled integration tests before enablement. |
+| `/sign <message>` | Temporarily disabled | No signature request is created until a persistent confirmation/status workflow is implemented. |
+| `/services [query]` | Discovery only | Shows available services; service checkout is not enabled. |
+| Natural-language helper | Optional, draft-only | It may explain features or prepare guidance but never creates transfers, signatures, or payment requests. |
 
-## 🔐 Security Analysis
+## Safety model
 
-This project is designed with a **Security-First** approach, leveraging the robust architecture of Paybox.
+The bot treats financial actions as high-risk operations. It applies the following safeguards:
 
-### 1. Non-Custodial Architecture
-The bot **never** has access to your raw private keys or credit card numbers. All signing operations occur within the MoonX MPC (Multi-Party Computation) environment. The bot only receives a "scoped output" (a signature or a one-time virtual card).
+1. **Asset allowlist and exact units.** Only native ETH and SOL are accepted. Amounts are parsed as decimal strings and converted with `BigInt`; the bot never uses floating-point arithmetic for an on-chain amount. ETH uses 18 decimal places (wei), while SOL uses 9 decimal places (lamports).[1] [2]
+2. **Address validation.** Ethereum and Solana destination addresses are checked before a payment draft is created.
+3. **Explicit confirmation.** A payment draft records the Telegram user ID, chat ID, expiry time, and requested details. Only the originating user in the originating chat can confirm or cancel it.
+4. **AI cannot execute.** Natural-language output is limited to `balance`, `payment_draft`, `services`, and `chat`. The bot never maps AI text directly to a money-moving command.
+5. **Transfers fail closed.** `ENABLE_WALLET_TRANSFERS=false` is the default. An attempt to enable transfers without `PAYBOX_TRANSFER_ADAPTER_CONFIRMED=true` prevents startup.
+6. **Redacted errors and logs.** Users receive a correlation reference rather than raw provider or implementation errors. Update logs omit message text and callback payloads.
+7. **Basic abuse protection.** The in-process limiter allows 20 updates per user per minute. Production deployment must replace this with a shared store.
 
-### 2. Passkey-Gated Approvals
-Even if the bot is compromised, it cannot move significant funds without your explicit consent. Any operation above your set threshold will pause and wait for your **Passkey approval** on your personal device.
+## Architecture
 
-### 3. Scoped Grants & Limits
-You stay in control by setting specific grants for the bot:
-- **Amount Limits**: Restrict how much the bot can spend per transaction or per day.
-- **Credential Access**: Grant access only to specific wallets or cards, not your entire portfolio.
-- **Autonomous vs. Approval**: Choose which operations need a passkey and which can be autonomous.
-
-### 4. Secure Credential Handling
-- **Environment Variables**: Sensitive keys (Auth Token, Signing Key) are stored in a `.env` file, which is excluded from version control via `.gitignore`.
-- **In-Process Signing**: When using a Signing Key, the SDK performs signing in-process, ensuring that the MoonX secret never leaves the secure boundary.
-
-### 5. Auditability
-Every single action taken by the bot is recorded in the Paybox **Audit Log**. You can review every request, approval, and transaction hash at any time in the Paybox dashboard.
-
-### 🛑 Important Safety Tips
-- **Never share your .env file** or commit it to GitHub.
-- **Set strict limits** in the Paybox dashboard for the "Tele" agent.
-- **Regularly review the Audit Log** to monitor bot activity.
-- **Revoke access immediately** in the Paybox dashboard if you suspect any unusual behavior.
-
----
-
-## 🤖 AI Agent Integration Tutorial
-
-Since Paybox is a non-custodial wallet for AI agents, you can use the same Paybox account to power tools like **Claude Code**, **Claude Desktop**, and **ChatGPT**. This Telegram bot acts as your mobile interface, while these tools act as your developer interface.
-
-### 1. AI Agent Mode (Inside this Bot)
-This bot now features a **Natural Language Mode** powered by LLMs (like GPT-4 or Claude). Instead of typing commands, you can just chat:
-- *"How much money do I have?"* -> Triggers `/balance`
-- *"Send 10 bucks to @friend in SOL"* -> Triggers `/pay @friend 10 SOL`
-- *"I want to book a flight to Tokyo"* -> Triggers `/services flights`
-
-To enable this, add your `OPENAI_API_KEY` to the `.env` file.
-
-### 2. Integrating with Claude (Desktop & Code)
-Paybox speaks the **Model Context Protocol (MCP)**. You can add Paybox as a custom connector.
-
-**Steps for Claude Desktop:**
-1. Open Claude Desktop and go to `Settings` -> `Customize` -> `Connectors`.
-2. Click **Add Connector** and paste the Paybox MCP URL:
-   ```
-   https://api.paybox.sh/mcp
-   ```
-3. Sign in with your Passkey when prompted and approve the grant.
-4. Now you can ask Claude: *"Check my Paybox portfolio"* or *"Send 0.1 ETH to 0x..."*.
-
-**Steps for Claude Code (CLI):**
-Add the Paybox MCP server to your `claude_desktop_config.json` (or your specific tool config):
-```json
-{
-  "mcpServers": {
-    "paybox": {
-      "command": "npx",
-      "args": ["-y", "@paybox-sh/sdk", "mcp"]
-    }
-  }
-}
+```mermaid
+flowchart TD
+    T[Telegram update] --> M[Middleware: error boundary, rate limit, redacted logging]
+    M --> C[Command router]
+    C --> B[/balance: read-only Paybox query]
+    C --> D[/pay: validate and create local draft]
+    D --> I[Payment intent: user + chat + expiry]
+    I --> X[Explicit callback confirmation]
+    X --> G[Disabled-by-default Paybox transfer gateway]
+    C --> A[AI classifier: draft-only]
+    A --> C
+    C --> S[/services: discovery only]
 ```
 
-### 3. Integrating with ChatGPT (Custom GPTs & Codex)
-You can create a Custom GPT that uses Paybox as an Action.
+## Prerequisites
 
-1. Create a new **GPT** in ChatGPT.
-2. Go to **Configure** -> **Create new action**.
-3. Import from URL using the Paybox OpenAPI spec (found in [Paybox Docs](https://docs.paybox.sh/api-reference)).
-4. Set up **OAuth 2.1** authentication using the endpoints:
-   - **Authorize URL**: `https://api.paybox.sh/oauth/authorize`
-   - **Token URL**: `https://api.paybox.sh/oauth/token`
-5. Now your GPT can handle payments and check balances on your behalf!
+| Requirement | Version | Purpose |
+|---|---:|---|
+| Node.js | 20 or newer | Runtime and built-in test runner. |
+| Telegram bot token | — | Receives bot updates. |
+| Paybox API key | — | Reads credentials and portfolio data. |
+| Optional OpenAI API key | — | Enables natural-language guidance only. |
 
-### 4. How they work together
-- **Telegram Bot**: Use it for quick checks, mobile payments, and notifications while on the go.
-- **Claude/ChatGPT**: Use them for complex financial analysis, automated trading scripts, or building Web3 apps.
-- **Unified Identity**: All tools share the same Paybox identity and security settings (Passkey, Scoped Grants, Audit Log).
+## Setup
 
----
+```bash
+git clone https://github.com/nialthony/paybox-telegram-bot.git
+cd paybox-telegram-bot
+npm install
+cp .env.example .env
+```
 
-## 🗺️ Project Roadmap & Phases
+Set the required variables in `.env`:
 
-To make this bot the ultimate Web3 companion on Telegram, we follow a structured development roadmap:
+```dotenv
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+PAYBOX_API_KEY=pbx_live_your_auth_token_here
+ENABLE_WALLET_TRANSFERS=false
+```
 
-### Phase 1: Foundation (Current)
-- [x] Integration with @paybox-sh/sdk.
-- [x] Portfolio balance checking across multiple chains.
-- [x] Basic `/pay` and `/transfer` functionality.
-- [x] Message signing capabilities.
-- [x] x402 service discovery.
+Start the bot with long polling:
 
-### Phase 2: Enhanced User Experience (Next)
-- [ ] **User Registry**: Database integration to map Telegram handles to wallet addresses.
-- [ ] **Inline Keyboards**: Quick actions for common tasks (e.g., "Pay Back", "View Tx").
-- [ ] **Real-time Notifications**: Instant alerts when a payment is received or a request is approved.
-- [ ] **Multi-currency Support**: Automatic price conversion for common tokens.
+```bash
+npm start
+```
 
-### Phase 3: Autonomous Agents & Automation
-- [ ] **Scheduled Payments**: Set up recurring transfers or subscription payments.
-- [ ] **Trading Agents**: Deploy AI agents that trade on prediction markets based on your custom signals.
-- [ ] **Smart Alerts**: Get notified of portfolio changes or market opportunities.
+For local development with restart-on-change:
 
-### Phase 4: Ecosystem Expansion
-- [ ] **Group Chat Features**: Split bills and group expenses within Telegram groups.
-- [ ] **Merchant Tools**: Allow businesses to accept Paybox payments via Telegram bots.
-- [ ] **White-label SDK**: A framework for other developers to build their own Paybox-powered Telegram bots.
+```bash
+npm run dev
+```
 
----
+## Environment configuration
 
-## 🚀 Quick Start
+| Variable | Required | Safe default | Purpose |
+|---|---:|---|---|
+| `TELEGRAM_BOT_TOKEN` | Yes | — | Telegram bot authentication. |
+| `PAYBOX_API_KEY` | Yes | — | Paybox API authentication. |
+| `PAYBOX_SIGNING_KEY` | No | Unset | High-sensitivity signing key; do not configure until the signing flow is production-ready. |
+| `OPENAI_API_KEY` | No | Unset | Enables non-executing natural-language assistance. |
+| `OPENAI_MODEL` | No | `gpt-4o-mini` | AI classifier model. |
+| `ENABLE_WALLET_TRANSFERS` | No | `false` | Enables transfer adapter only after verification. |
+| `PAYBOX_TRANSFER_ADAPTER_CONFIRMED` | Conditional | `false` | Must be `true` with transfer enablement after verified integration testing. |
 
-### Prerequisites
-- Node.js 18+
-- A Telegram Bot Token (from [@BotFather](https://t.me/botfather))
-- A Paybox account ([app.paybox.sh](https://app.paybox.sh))
-- Paybox API key
+Never commit `.env` files, deploy secrets in client code, or send secret values in Telegram messages.
 
-### Installation
+## Commands
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/nialthony/paybox-telegram-bot.git
-   cd paybox-telegram-bot
-   ```
+| Command | Description |
+|---|---|
+| `/start` | Explain the current capability and safety posture. |
+| `/help` | Display the supported command set. |
+| `/balance [wallet_address]` | Show a Paybox portfolio; pass a wallet address when it cannot be inferred from credential metadata. |
+| `/pay <address> <amount> <ETH|SOL>` | Create a validated, expiring payment draft. |
+| `/transfer <address> <amount> <ETH|SOL>` | Legacy alias of `/pay`. |
+| `/sign <message>` | Displays the current signing safety gate; no request is created. |
+| `/services [query]` | Discover services without initiating checkout. |
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+## Quality checks
 
-3. **Configure environment variables**
-   ```bash
-   cp .env.example .env
-   ```
-   Edit `.env` and add:
-   - `TELEGRAM_BOT_TOKEN`: Your token from @BotFather.
-   - `PAYBOX_API_KEY`: The **Auth Token** from Paybox (starts with `pbx_live_`).
-   - `PAYBOX_SIGNING_KEY`: The **Signing Key** from Paybox (starts with `pbxk1_`, optional but recommended).
+The repository uses Node’s built-in test runner so core safety controls can be tested without calling Telegram, Paybox, or an LLM.
 
-4. **Start the bot**
-   ```bash
-   npm start
-   ```
+```bash
+npm test
+find src test -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+```
 
-## 📱 Usage
+The suite covers exact ETH/SOL conversions, unsupported input rejection, ownership and expiry of payment drafts, AI intent restrictions, configuration guards, rate limiting, and the transfer-adapter gate. GitHub Actions runs these checks for pushes and pull requests to `main`.
 
-| Command | Description | Example |
-|---------|-------------|---------|
-| `/pay` | Send crypto to a user or address | `/pay @user 1.5 ETH` |
-| `/balance` | Check your crypto portfolio | `/balance` |
-| `/services` | Browse x402 services | `/services flights` |
-| `/sign` | Sign a message | `/sign gm frens` |
+## Before enabling mainnet wallet transfers
 
----
+Do **not** change the transfer flags solely to test a live transfer. Complete each item below first.
 
-### 📖 Detailed Examples
-Check out [EXAMPLES.md](./EXAMPLES.md) to see full simulated bot interactions and responses.
+1. Verify the installed `@paybox-sh/sdk` transfer operation and its exact amount-unit contract from official SDK documentation or Paybox support. The current SDK documentation exposes payment, signing, swap, service, and request-status operations; the source adapter stays disabled until the wallet-transfer method is confirmed.[3]
+2. Add a production persistence adapter (PostgreSQL or Redis) for payment intents, account linking, idempotency keys, rate-limit counters, and audit events. In-memory Maps are not safe across restarts or multiple instances.
+3. Implement provider webhook handling or a durable worker that records request-status changes. Telegram webhook endpoints should verify Telegram’s `secret_token` header and process updates idempotently.[4]
+4. Build controlled staging/testnet integration tests for the actual Paybox API contract, including approvals, denials, retries, timeouts, and duplicate Telegram updates.
+5. Add shared rate limiting, monitored audit logs, secret scanning, dependency scanning, and an emergency kill switch.
+6. Complete an independent application-security review and a controlled mainnet launch checklist before allowing users to create transfer requests.
 
----
+## Deployment approaches
 
-**Made with ❤️ to showcase the power of Paybox + Telegram**
+A Telegram bot must remain reachable for updates. Two viable deployment approaches are:
 
-🔗 [Paybox](https://paybox.sh) | 🤖 [Telegraf](https://telegraf.js.org) | 💬 [Telegram](https://telegram.org)
+| Approach | Tradeoffs | Cost | Setup complexity |
+|---|---|---|---|
+| **Managed HTTPS service with Telegram webhooks** | Suitable for a production API, shared database, verified webhooks, and horizontal scaling. Requires a secure secret configuration and persistent data service. | Starts low and varies by usage. | Moderate. |
+| **Single always-on worker using long polling** | Simpler initial operational model, but needs durable state and one active worker. Less flexible for scale-out. | Depends on the host’s always-on runtime. | Lower. |
+
+For production, choose one model, persist all intents outside process memory, and ensure only one consumer handles each update or that updates are deduplicated by Telegram update ID.
+
+## Contributing
+
+1. Create a focused branch.
+2. Do not add a new user-visible command until it has a registered handler, a documented status, and automated tests.
+3. Keep money-moving logic inside the transaction domain and provider adapter; never duplicate amount conversion or provider polling in command files.
+4. Run `npm test` and the syntax check before opening a pull request.
+5. Do not merge changes that weaken default-deny behavior for transfers or signing without documented security review.
+
+## References
+
+[1]: [Ethereum — technical introduction to ether and wei](https://ethereum.org/en/developers/docs/intro-to-ether/)
+[2]: [Solana terminology — lamport](https://solana.com/docs/references/terminology#lamport)
+[3]: [Paybox SDK and CLI documentation](https://docs.paybox.sh/sdk-cli)
+[4]: [Telegram Bot API — webhooks and secret tokens](https://core.telegram.org/bots/api#setwebhook)
