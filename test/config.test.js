@@ -27,3 +27,28 @@ test('configuration permits transfer enablement only with the explicit adapter c
   });
   assert.equal(config.walletTransfersEnabled, true);
 });
+
+test('production configuration requires a durable database URL', () => {
+  assert.throws(
+    () => loadConfig({ ...baseEnv, NODE_ENV: 'production' }),
+    /DATABASE_URL is required in production/,
+  );
+});
+
+test('production configuration accepts a database URL and safe reconciliation interval', () => {
+  const config = loadConfig({
+    ...baseEnv,
+    NODE_ENV: 'production',
+    DATABASE_URL: 'postgres://paybox:test@localhost:5432/paybox',
+    RECONCILIATION_INTERVAL_MS: '10000',
+  });
+  assert.equal(config.databaseUrl, 'postgres://paybox:test@localhost:5432/paybox');
+  assert.equal(config.reconciliationIntervalMs, 10000);
+});
+
+test('configuration rejects an overly aggressive reconciliation interval', () => {
+  assert.throws(
+    () => loadConfig({ ...baseEnv, RECONCILIATION_INTERVAL_MS: '1000' }),
+    /RECONCILIATION_INTERVAL_MS must be an integer/,
+  );
+});

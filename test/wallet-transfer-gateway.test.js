@@ -27,6 +27,9 @@ test('transfer adapter passes only validated draft fields to the provider', asyn
         payload = request;
         return { status: 'pending_approval' };
       },
+      async getRequest() {
+        return { request_id: 'request_1', status: 'pending_approval' };
+      },
     },
   });
 

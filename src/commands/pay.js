@@ -42,7 +42,7 @@ function formatDraft(draft) {
 export async function payCommand(ctx, commandText = ctx.message?.text) {
   try {
     const draft = parsePaymentCommand(commandText);
-    const intent = ctx.paymentIntents.createDraft({
+    const intent = await ctx.paymentIntents.createDraft({
       telegramUserId: ctx.from?.id,
       chatId: ctx.chat?.id,
       draft,
@@ -70,7 +70,7 @@ export async function payCommand(ctx, commandText = ctx.message?.text) {
 export async function confirmPaymentCallback(ctx, intentId) {
   let claimedIntentId = null;
   try {
-    const activeIntent = ctx.paymentIntents.getOwnedActiveIntent({
+    const activeIntent = await ctx.paymentIntents.getOwnedActiveIntent({
       id: intentId,
       telegramUserId: ctx.from?.id,
       chatId: ctx.chat?.id,
@@ -82,7 +82,7 @@ export async function confirmPaymentCallback(ctx, intentId) {
       return;
     }
 
-    const intent = ctx.paymentIntents.claimForCreation({
+    const intent = await ctx.paymentIntents.claimForCreation({
       id: activeIntent.id,
       telegramUserId: ctx.from?.id,
       chatId: ctx.chat?.id,
@@ -98,7 +98,7 @@ export async function confirmPaymentCallback(ctx, intentId) {
 
     const providerRequestId = transfer.request_id || transfer.id || null;
     if (transfer.status === 'pending_approval') {
-      ctx.paymentIntents.transition(intent.id, 'pending_approval', { providerRequestId });
+      await ctx.paymentIntents.transition(intent.id, 'pending_approval', { providerRequestId, providerStatus: transfer.status });
       await ctx.answerCbQuery('Approval is required in Paybox.');
       await ctx.reply(
         '🔐 *Approval required*\n\nApprove this request in Paybox. The bot will not poll in-memory; check the request status in Paybox until durable webhook processing is configured.',
@@ -113,18 +113,18 @@ export async function confirmPaymentCallback(ctx, intentId) {
     }
 
     if (transfer.status === 'success') {
-      ctx.paymentIntents.transition(intent.id, 'succeeded', { providerRequestId });
+      await ctx.paymentIntents.transition(intent.id, 'succeeded', { providerRequestId, providerStatus: transfer.status });
       await ctx.answerCbQuery('Payment request completed.');
       await ctx.reply('✅ Payment request completed. Verify the transaction in Paybox before treating it as final.');
       return;
     }
 
-    ctx.paymentIntents.transition(intent.id, 'failed', { providerRequestId });
+    await ctx.paymentIntents.transition(intent.id, 'failed', { providerRequestId, providerStatus: transfer.status });
     await ctx.answerCbQuery('Payment request was not accepted.');
     await ctx.reply('❌ Paybox did not accept the payment request. No further action was taken.');
   } catch (error) {
     if (claimedIntentId) {
-      ctx.paymentIntents.transition(claimedIntentId, 'failed');
+      await ctx.paymentIntents.transition(claimedIntentId, 'failed');
     }
     if (error instanceof PaymentIntentError || error instanceof WalletTransferGatewayError) {
       await ctx.answerCbQuery(error.message).catch(() => {});
@@ -144,7 +144,7 @@ export async function confirmPaymentCallback(ctx, intentId) {
 
 export async function cancelPaymentCallback(ctx, intentId) {
   try {
-    ctx.paymentIntents.cancel({
+    await ctx.paymentIntents.cancel({
       id: intentId,
       telegramUserId: ctx.from?.id,
       chatId: ctx.chat?.id,

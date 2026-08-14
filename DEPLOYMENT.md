@@ -33,6 +33,8 @@ Set secrets in the hosting platform’s secret manager, not in a committed `.env
 # Required
 TELEGRAM_BOT_TOKEN=...
 PAYBOX_API_KEY=...
+DATABASE_URL=postgres://user:password@host:5432/paybox
+RECONCILIATION_INTERVAL_MS=30000
 
 # Optional, non-executing natural-language helper
 OPENAI_API_KEY=...
@@ -55,7 +57,7 @@ npm test
 find src test -type f -name '*.js' -print0 | xargs -0 -n1 node --check
 ```
 
-The repository’s GitHub Actions workflow runs the dependency-free safety suite and syntax checks on pushes and pull requests. Add dependency and secret scanning before the first public beta.
+The repository’s GitHub Actions workflow runs the safety suite and syntax checks on pushes and pull requests. The PostgreSQL integration test runs when `TEST_DATABASE_URL` is supplied in a dedicated test environment. Add dependency and secret scanning before the first public beta.
 
 ## 5. Launch checklist
 
@@ -73,9 +75,9 @@ The repository’s GitHub Actions workflow runs the dependency-free safety suite
 
 - [ ] Verify that the installed Paybox SDK actually exposes the approved transfer operation and document its request/response contract.
 - [ ] Verify the exact amount-unit contract in controlled staging/testnet tests for ETH and SOL.
-- [ ] Replace in-memory payment intents and rate-limit data with PostgreSQL or Redis.
-- [ ] Add idempotency keys and enforce one provider request per confirmed intent.
-- [ ] Add a durable provider-status integration by webhook or worker queue; do not restore ad-hoc `setTimeout` polling.
+- [ ] Deploy the PostgreSQL payment-intent schema with restricted runtime permissions. The bot runs the checked-in migration at startup and refuses production startup without `DATABASE_URL`.
+- [ ] Confirm idempotency keys and the conditional database claim enforce one provider request per confirmed intent.
+- [ ] Verify the durable reconciliation loop against the provider’s request-status contract; add an outbox-backed notification worker before promising Telegram status notifications.
 - [ ] Build integration tests for approval, denial, timeout, provider error, duplicated callback, process restart, and duplicate Telegram update cases.
 - [ ] Define a manual kill switch that stops new transfer creation without exposing configuration changes in chat.
 - [ ] Complete an independent security review and record a formal launch approval.

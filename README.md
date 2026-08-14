@@ -36,7 +36,7 @@ flowchart TD
     M --> C[Command router]
     C --> B[/balance: read-only Paybox query]
     C --> D[/pay: validate and create local draft]
-    D --> I[Payment intent: user + chat + expiry]
+    D --> I[Payment intent: PostgreSQL in production, memory in local development]
     I --> X[Explicit callback confirmation]
     X --> G[Disabled-by-default Paybox transfer gateway]
     C --> A[AI classifier: draft-only]
@@ -51,6 +51,7 @@ flowchart TD
 | Node.js | 20 or newer | Runtime and built-in test runner. |
 | Telegram bot token | — | Receives bot updates. |
 | Paybox API key | — | Reads credentials and portfolio data. |
+| PostgreSQL | 14 or newer | Durable payment intents and reconciliation state in production. |
 | Optional OpenAI API key | — | Enables natural-language guidance only. |
 
 ## Setup
@@ -67,6 +68,8 @@ Set the required variables in `.env`:
 ```dotenv
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 PAYBOX_API_KEY=pbx_live_your_auth_token_here
+DATABASE_URL=postgres://paybox:replace-me@localhost:5432/paybox
+RECONCILIATION_INTERVAL_MS=30000
 ENABLE_WALLET_TRANSFERS=false
 ```
 
@@ -88,6 +91,8 @@ npm run dev
 |---|---:|---|---|
 | `TELEGRAM_BOT_TOKEN` | Yes | — | Telegram bot authentication. |
 | `PAYBOX_API_KEY` | Yes | — | Paybox API authentication. |
+| `DATABASE_URL` | Production | — | PostgreSQL connection for durable payment intents; production startup rejects its absence. |
+| `RECONCILIATION_INTERVAL_MS` | No | `30000` | Minimum 5-second interval for provider request reconciliation. |
 | `PAYBOX_SIGNING_KEY` | No | Unset | High-sensitivity signing key; do not configure until the signing flow is production-ready. |
 | `OPENAI_API_KEY` | No | Unset | Enables non-executing natural-language assistance. |
 | `OPENAI_MODEL` | No | `gpt-4o-mini` | AI classifier model. |
@@ -117,15 +122,15 @@ npm test
 find src test -type f -name '*.js' -print0 | xargs -0 -n1 node --check
 ```
 
-The suite covers exact ETH/SOL conversions, unsupported input rejection, ownership and expiry of payment drafts, AI intent restrictions, configuration guards, rate limiting, and the transfer-adapter gate. GitHub Actions runs these checks for pushes and pull requests to `main`.
+The suite covers exact ETH/SOL conversions, unsupported input rejection, ownership and expiry of payment drafts, AI intent restrictions, configuration guards, rate limiting, the transfer-adapter gate, provider-status mapping, and reconciliation failure isolation. The PostgreSQL integration test is skipped unless `TEST_DATABASE_URL` is provided. GitHub Actions runs the dependency-free checks for pushes and pull requests to `main`.
 
 ## Before enabling mainnet wallet transfers
 
 Do **not** change the transfer flags solely to test a live transfer. Complete each item below first.
 
 1. Verify the installed `@paybox-sh/sdk` transfer operation and its exact amount-unit contract from official SDK documentation or Paybox support. The current SDK documentation exposes payment, signing, swap, service, and request-status operations; the source adapter stays disabled until the wallet-transfer method is confirmed.[3]
-2. Add a production persistence adapter (PostgreSQL or Redis) for payment intents, account linking, idempotency keys, rate-limit counters, and audit events. In-memory Maps are not safe across restarts or multiple instances.
-3. Implement provider webhook handling or a durable worker that records request-status changes. Telegram webhook endpoints should verify Telegram’s `secret_token` header and process updates idempotently.[4]
+2. Deploy the PostgreSQL persistence adapter with restricted database permissions for payment intents, idempotency keys, state transitions, and audit events. In-memory Maps are not safe across restarts or multiple instances.
+3. Use the durable reconciliation worker for provider request-status changes, then add provider webhooks or an outbox-backed notification worker when user notifications are required. Telegram webhook endpoints should verify Telegram’s `secret_token` header and process updates idempotently.[4]
 4. Build controlled staging/testnet integration tests for the actual Paybox API contract, including approvals, denials, retries, timeouts, and duplicate Telegram updates.
 5. Add shared rate limiting, monitored audit logs, secret scanning, dependency scanning, and an emergency kill switch.
 6. Complete an independent application-security review and a controlled mainnet launch checklist before allowing users to create transfer requests.

@@ -6,6 +6,8 @@ import { setupMiddleware } from './middleware/index.js';
 import { PayboxAgent } from './agent/index.js';
 import { loadConfig } from './config.js';
 import { PaymentIntentStore } from './services/payment-intents.js';
+import { PostgresPaymentIntentStore } from './services/postgres-payment-intents.js';
+import { startReconciliationLoop } from './services/reconciliation.js';
 import { createWalletTransferGateway } from './services/wallet-transfer-gateway.js';
 import { reportError } from './lib/errors.js';
 
@@ -20,7 +22,15 @@ const paybox = PayboxClient.fromConfig({
 
 bot.context.paybox = paybox;
 bot.context.agent = new PayboxAgent(config.openAiApiKey, { model: config.openAiModel });
-bot.context.paymentIntents = new PaymentIntentStore();
+const paymentIntents = config.databaseUrl
+  ? PostgresPaymentIntentStore.fromConnectionString({ connectionString: config.databaseUrl })
+  : new PaymentIntentStore();
+
+if (typeof paymentIntents.initialize === 'function') {
+  await paymentIntents.initialize();
+}
+
+bot.context.paymentIntents = paymentIntents;
 bot.context.transferGateway = createWalletTransferGateway({
   paybox,
   enabled: config.walletTransfersEnabled,
@@ -28,6 +38,12 @@ bot.context.transferGateway = createWalletTransferGateway({
 
 setupMiddleware(bot);
 setupCommands(bot);
+
+const reconciliationLoop = startReconciliationLoop({
+  store: paymentIntents,
+  gateway: bot.context.transferGateway,
+  intervalMs: config.reconciliationIntervalMs,
+});
 
 bot.catch(async (error, ctx) => {
   const referenceId = reportError({
@@ -43,5 +59,11 @@ bot.launch({ allowedUpdates: ['message', 'callback_query'] });
 console.log('Paybox Telegram Bot started.');
 console.log(`Wallet transfer requests: ${config.walletTransfersEnabled ? 'enabled' : 'disabled'}`);
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+const shutdown = async (signal) => {
+  reconciliationLoop.stop();
+  bot.stop(signal);
+  if (typeof paymentIntents.close === 'function') await paymentIntents.close();
+};
+
+process.once('SIGINT', () => { void shutdown('SIGINT'); });
+process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
