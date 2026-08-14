@@ -16,6 +16,10 @@ export class PaymentIntentStore {
     this.intents = new Map();
   }
 
+  async checkHealth() {
+    return true;
+  }
+
   createDraft({ telegramUserId, chatId, draft }) {
     if (!telegramUserId || !chatId || !draft) {
       throw new PaymentIntentError('Payment intent requires a Telegram user, chat, and validated draft.');

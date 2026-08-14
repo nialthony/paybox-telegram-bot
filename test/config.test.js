@@ -28,6 +28,17 @@ test('configuration permits transfer enablement only with the explicit adapter c
   assert.equal(config.walletTransfersEnabled, true);
 });
 
+test('configuration kill switch disables transfers even when enablement was requested', () => {
+  const config = loadConfig({
+    ...baseEnv,
+    ENABLE_WALLET_TRANSFERS: 'true',
+    PAYBOX_WALLET_TRANSFERS_KILL_SWITCH: 'true',
+  });
+  assert.equal(config.walletTransfersRequested, true);
+  assert.equal(config.walletTransfersKillSwitch, true);
+  assert.equal(config.walletTransfersEnabled, false);
+});
+
 test('production configuration requires a durable database URL', () => {
   assert.throws(
     () => loadConfig({ ...baseEnv, NODE_ENV: 'production' }),
@@ -50,5 +61,12 @@ test('configuration rejects an overly aggressive reconciliation interval', () =>
   assert.throws(
     () => loadConfig({ ...baseEnv, RECONCILIATION_INTERVAL_MS: '1000' }),
     /RECONCILIATION_INTERVAL_MS must be an integer/,
+  );
+});
+
+test('configuration rejects an invalid health port', () => {
+  assert.throws(
+    () => loadConfig({ ...baseEnv, HEALTH_PORT: '70000' }),
+    /HEALTH_PORT must be an integer/,
   );
 });

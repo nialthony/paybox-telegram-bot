@@ -10,6 +10,7 @@ import { PostgresPaymentIntentStore } from './services/postgres-payment-intents.
 import { startReconciliationLoop } from './services/reconciliation.js';
 import { createWalletTransferGateway } from './services/wallet-transfer-gateway.js';
 import { reportError } from './lib/errors.js';
+import { checkStoreReadiness, createHealthServer } from './lib/health.js';
 
 dotenv.config();
 
@@ -45,6 +46,26 @@ const reconciliationLoop = startReconciliationLoop({
   intervalMs: config.reconciliationIntervalMs,
 });
 
+let botReady = false;
+
+const healthServer = createHealthServer({
+  host: config.healthHost,
+  port: config.healthPort,
+  getReadiness: async () => {
+    const checks = {
+      bot: botReady,
+      paymentIntents: false,
+      transferGateway: Boolean(bot.context.transferGateway),
+    };
+    try {
+      checks.paymentIntents = await checkStoreReadiness(paymentIntents);
+    } catch (error) {
+      reportError({ scope: 'readiness_check', error });
+    }
+    return { ready: Object.values(checks).every(Boolean), checks };
+  },
+});
+
 bot.catch(async (error, ctx) => {
   const referenceId = reportError({
     scope: 'bot_update',
@@ -54,14 +75,26 @@ bot.catch(async (error, ctx) => {
   await ctx.reply(`❌ We could not process that update. Reference: \`${referenceId}\``, { parse_mode: 'Markdown' }).catch(() => {});
 });
 
-bot.launch({ allowedUpdates: ['message', 'callback_query'] });
+try {
+  await healthServer.listen();
+  await bot.launch({ allowedUpdates: ['message', 'callback_query'] });
+  botReady = true;
+} catch (error) {
+  await healthServer.close().catch(() => {});
+  reconciliationLoop.stop();
+  if (typeof paymentIntents.close === 'function') await paymentIntents.close().catch(() => {});
+  throw error;
+}
 
 console.log('Paybox Telegram Bot started.');
-console.log(`Wallet transfer requests: ${config.walletTransfersEnabled ? 'enabled' : 'disabled'}`);
+console.log(`Health server listening on ${config.healthHost}:${config.healthPort}`);
+console.log(`Wallet transfer requests: ${config.walletTransfersKillSwitch ? 'disabled (emergency kill switch)' : config.walletTransfersEnabled ? 'enabled' : 'disabled'}`);
 
 const shutdown = async (signal) => {
+  botReady = false;
   reconciliationLoop.stop();
   bot.stop(signal);
+  await healthServer.close().catch(() => {});
   if (typeof paymentIntents.close === 'function') await paymentIntents.close();
 };
 

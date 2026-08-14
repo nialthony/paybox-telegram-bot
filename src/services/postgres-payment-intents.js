@@ -66,6 +66,11 @@ export class PostgresPaymentIntentStore {
     await this.pool.query(MIGRATION_SQL);
   }
 
+  async checkHealth() {
+    await this.pool.query('SELECT 1');
+    return true;
+  }
+
   async close() {
     await this.pool.end();
   }

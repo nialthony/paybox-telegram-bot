@@ -35,6 +35,8 @@ TELEGRAM_BOT_TOKEN=...
 PAYBOX_API_KEY=...
 DATABASE_URL=postgres://user:password@host:5432/paybox
 RECONCILIATION_INTERVAL_MS=30000
+HEALTH_HOST=0.0.0.0
+HEALTH_PORT=3000
 
 # Optional, non-executing natural-language helper
 OPENAI_API_KEY=...
@@ -43,6 +45,7 @@ OPENAI_MODEL=gpt-4o-mini
 # Keep these disabled until all transfer gates are completed.
 ENABLE_WALLET_TRANSFERS=false
 PAYBOX_TRANSFER_ADAPTER_CONFIRMED=false
+PAYBOX_WALLET_TRANSFERS_KILL_SWITCH=false
 ```
 
 Do not configure `PAYBOX_SIGNING_KEY` in a public deployment while `/sign` remains gated. Rotate any token immediately if it is exposed in source control, CI logs, a terminal recording, or a Telegram message.
@@ -70,6 +73,7 @@ The repository’s GitHub Actions workflow runs the safety suite and syntax chec
 - [ ] Confirm that invalid amounts, unsupported assets, username recipients, and expired draft callbacks are rejected.
 - [ ] Confirm that logs contain correlation IDs and metadata only—not user message bodies or provider errors.
 - [ ] Configure uptime/error monitoring and a restart policy.
+- [ ] Verify `GET /healthz` returns HTTP 200 and `GET /readyz` returns HTTP 200 only after the bot worker, payment-intent store, and transfer gateway are initialized.
 
 ### Before enabling wallet transfers
 
@@ -104,7 +108,7 @@ Telegram supports an optional `secret_token` that is delivered in the `X-Telegra
 
 If you suspect misuse, provider-contract mismatch, or secret exposure:
 
-1. Immediately disable new wallet-transfer requests through the deployment configuration and restart the worker.
+1. Immediately set `PAYBOX_WALLET_TRANSFERS_KILL_SWITCH=true` and restart the worker. This stops new wallet-transfer requests even if enablement was previously requested.
 2. Rotate exposed Telegram, Paybox, OpenAI, and webhook credentials.
 3. Review Paybox request/audit history and correlation IDs from application logs.
 4. Preserve relevant logs securely, without broadening access to sensitive user data.

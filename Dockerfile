@@ -11,4 +11,5 @@ COPY db ./db
 COPY scripts ./scripts
 
 USER node
+EXPOSE 3000
 CMD ["node", "src/index.js"]

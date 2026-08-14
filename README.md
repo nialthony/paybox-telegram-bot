@@ -2,7 +2,7 @@
 
 A Telegram companion for **read-only portfolio checks**, **validated payment drafts**, **message-signing guidance**, and **x402 service discovery**. The bot is designed around Paybox credentials and approvals, but it deliberately keeps high-risk wallet transfers disabled until the installed SDK contract has been independently verified in a controlled environment.
 
-> **Current release posture: hardened prototype.** The repository now has safe payment parsing, recipient validation, explicit Telegram confirmation controls, AI draft-only behavior, rate limiting, redacted errors, and a test baseline. It is **not approved for mainnet wallet transfers** until the transfer adapter, persistent state, webhook handling, and external security review are complete.
+> **Current release posture: staging-ready baseline.** The repository has safe payment parsing, recipient validation, explicit Telegram confirmation controls, AI draft-only behavior, persistent intents, reconciliation, redacted errors, liveness/readiness checks, an emergency transfer kill switch, and automated tests. It is **not approved for mainnet wallet transfers** until the provider contract, controlled staging workflow, and external security review are complete.
 
 ## What is available now
 
@@ -24,7 +24,7 @@ The bot treats financial actions as high-risk operations. It applies the followi
 2. **Address validation.** Ethereum and Solana destination addresses are checked before a payment draft is created.
 3. **Explicit confirmation.** A payment draft records the Telegram user ID, chat ID, expiry time, and requested details. Only the originating user in the originating chat can confirm or cancel it.
 4. **AI cannot execute.** Natural-language output is limited to `balance`, `payment_draft`, `services`, and `chat`. The bot never maps AI text directly to a money-moving command.
-5. **Transfers fail closed.** `ENABLE_WALLET_TRANSFERS=false` is the default. An attempt to enable transfers without `PAYBOX_TRANSFER_ADAPTER_CONFIRMED=true` prevents startup.
+5. **Transfers fail closed.** `ENABLE_WALLET_TRANSFERS=false` is the default. An attempt to enable transfers without `PAYBOX_TRANSFER_ADAPTER_CONFIRMED=true` prevents startup. `PAYBOX_WALLET_TRANSFERS_KILL_SWITCH=true` disables new transfer creation on the next restart even if transfer enablement was requested.
 6. **Redacted errors and logs.** Users receive a correlation reference rather than raw provider or implementation errors. Update logs omit message text and callback payloads.
 7. **Basic abuse protection.** The in-process limiter allows 20 updates per user per minute. Production deployment must replace this with a shared store.
 
@@ -70,7 +70,10 @@ TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 PAYBOX_API_KEY=pbx_live_your_auth_token_here
 DATABASE_URL=postgres://paybox:replace-me@localhost:5432/paybox
 RECONCILIATION_INTERVAL_MS=30000
+HEALTH_HOST=127.0.0.1
+HEALTH_PORT=3000
 ENABLE_WALLET_TRANSFERS=false
+PAYBOX_WALLET_TRANSFERS_KILL_SWITCH=false
 ```
 
 Start the bot with long polling:
@@ -105,7 +108,7 @@ docker compose ps
 docker compose logs -f bot
 ```
 
-The bot container waits for PostgreSQL to become healthy, passes `DATABASE_URL` internally, and runs the checked-in payment-intent migration at startup. A successful startup should show the bot process without a configuration error. Keep `ENABLE_WALLET_TRANSFERS=false` and `PAYBOX_TRANSFER_ADAPTER_CONFIRMED=false` for every first deployment.
+The bot container waits for PostgreSQL to become healthy, passes `DATABASE_URL` internally, runs the checked-in payment-intent migration at startup, and exposes non-sensitive `GET /healthz` and `GET /readyz` endpoints on port 3000 inside the container. Verify the service with `docker compose ps` and `docker compose logs -f bot`. Keep `ENABLE_WALLET_TRANSFERS=false`, `PAYBOX_TRANSFER_ADAPTER_CONFIRMED=false`, and `PAYBOX_WALLET_TRANSFERS_KILL_SWITCH=false` for every first deployment; set the kill switch to `true` and restart immediately during an incident.
 
 For updates, pull the new code and rebuild the image without deleting the database volume:
 
@@ -133,11 +136,14 @@ The Docker deployment is suitable for read-only and draft-only staging. It is no
 | `PAYBOX_API_KEY` | Yes | — | Paybox API authentication. |
 | `DATABASE_URL` | Production | — | PostgreSQL connection for durable payment intents; production startup rejects its absence. |
 | `RECONCILIATION_INTERVAL_MS` | No | `30000` | Minimum 5-second interval for provider request reconciliation. |
+| `HEALTH_HOST` | No | `0.0.0.0` in Docker | Bind address for non-sensitive health endpoints. |
+| `HEALTH_PORT` | No | `3000` | Port for `/healthz` and `/readyz`; `0` is useful for tests only. |
 | `PAYBOX_SIGNING_KEY` | No | Unset | High-sensitivity signing key; do not configure until the signing flow is production-ready. |
 | `OPENAI_API_KEY` | No | Unset | Enables non-executing natural-language assistance. |
 | `OPENAI_MODEL` | No | `gpt-4o-mini` | AI classifier model. |
 | `ENABLE_WALLET_TRANSFERS` | No | `false` | Enables transfer adapter only after verification. |
 | `PAYBOX_TRANSFER_ADAPTER_CONFIRMED` | Conditional | `false` | Must be `true` with transfer enablement after verified integration testing. |
+| `PAYBOX_WALLET_TRANSFERS_KILL_SWITCH` | No | `false` | Emergency stop; when `true`, transfer creation remains disabled after restart. |
 
 Never commit `.env` files, deploy secrets in client code, or send secret values in Telegram messages.
 
@@ -161,7 +167,7 @@ The repository uses Node’s built-in test runner so core safety controls can be
 npm run check
 ```
 
-The suite covers exact ETH/SOL conversions, unsupported input rejection, ownership and expiry of payment drafts, AI intent restrictions, configuration guards, rate limiting, the transfer-adapter gate, provider-status mapping, and reconciliation failure isolation. The PostgreSQL integration test is skipped unless `TEST_DATABASE_URL` is provided. Run `npm run db:migrate` with `DATABASE_URL` to initialize the schema explicitly. GitHub Actions runs the dependency-free checks for pushes and pull requests to `main`.
+The suite covers exact ETH/SOL conversions, unsupported input rejection, ownership and expiry of payment drafts, AI intent restrictions, configuration guards, rate limiting, the transfer-adapter gate, provider-status mapping, reconciliation failure isolation, and health/readiness responses. The PostgreSQL integration test is skipped unless `TEST_DATABASE_URL` is provided. Run `npm run db:migrate` with `DATABASE_URL` to initialize the schema explicitly. GitHub Actions runs the checks for pushes and pull requests.
 
 ## Before enabling mainnet wallet transfers
 
@@ -171,7 +177,7 @@ Do **not** change the transfer flags solely to test a live transfer. Complete ea
 2. Deploy the PostgreSQL persistence adapter with restricted database permissions for payment intents, idempotency keys, state transitions, and audit events. In-memory Maps are not safe across restarts or multiple instances.
 3. Use the durable reconciliation worker for provider request-status changes, then add provider webhooks or an outbox-backed notification worker when user notifications are required. Telegram webhook endpoints should verify Telegram’s `secret_token` header and process updates idempotently.[4]
 4. Build controlled staging/testnet integration tests for the actual Paybox API contract, including approvals, denials, retries, timeouts, and duplicate Telegram updates.
-5. Add shared rate limiting, monitored audit logs, secret scanning, dependency scanning, and an emergency kill switch.
+5. Replace the in-process limiter with shared rate limiting for multi-instance deployments, configure monitored audit logs and secret scanning, exercise the implemented emergency kill switch, and verify the health/readiness probes.
 6. Complete an independent application-security review and a controlled mainnet launch checklist before allowing users to create transfer requests.
 
 ## Deployment approaches
