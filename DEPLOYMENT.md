@@ -1,312 +1,121 @@
-# 🚀 Deployment Guide - Paybox Telegram Bot
+# Deployment Guide
 
-This guide covers deploying the Paybox Telegram Bot to production.
+> **Status:** Deployment is suitable for read-only portfolio access, payment-draft preparation, and service discovery. It is **not approved for live wallet-transfer requests or signing** until the required production controls in this document are complete.
 
-## 📋 Prerequisites
+## 1. Deployment decision
 
-- Node.js 18+ installed
+A Telegram bot needs a durable process and a shared state store. Choose one update-delivery model; do not run long polling and webhooks for the same bot token at the same time.[1]
 
-- Telegram Bot Token from [@BotFather](https://t.me/botfather)
+| Model | Use when | Advantages | Required controls |
+|---|---|---|---|
+| **Single always-on long-polling worker** | Initial private beta or a single controlled deployment. | Lowest implementation complexity. | One active worker, managed secrets, PostgreSQL/Redis-backed state, restart policy, monitoring. |
+| **HTTPS webhook service** | Production, multiple instances, managed ingress, or higher throughput. | Scales cleanly and avoids a permanent polling connection. | HTTPS, Telegram `secret_token` verification, idempotent update handling, shared state, health checks. |
 
-- Paybox account with API key ([https://app.paybox.sh](https://app.paybox.sh) )
+The current code starts in long-polling mode. A webhook implementation should be added only alongside persistent payment intent storage and update deduplication.
 
-- A server or hosting platform (Heroku, Railway, Fly.io, etc.)
+## 2. Required production components
 
-- Domain name (optional, for webhook)
+| Component | Required before public use | Reason |
+|---|---:|---|
+| Managed secret store | Yes | Keep Telegram, Paybox, OpenAI, and future webhook secrets outside source control. |
+| Shared database | Yes | Persist payment drafts, idempotency keys, account links, audit IDs, and terminal states across restarts. |
+| Shared rate limiter | Yes | Replace the current in-process limiter when running more than one instance. |
+| Centralized structured logging | Yes | Monitor correlation IDs without logging message text, callback payloads, or secret values. |
+| Health and readiness checks | Yes | Detect failed workers and configuration errors quickly. |
+| Alerting | Yes | Notify operators of crash loops, error-rate spikes, and unexpected disabled/enabled transfer states. |
+| External security review | Yes for wallet transfer enablement | Verify Paybox API contract, approval controls, persistence, input validation, and deployment hardening. |
 
-## 🏠 Local Development
+## 3. Runtime configuration
 
-### 1. Setup
+Set secrets in the hosting platform’s secret manager, not in a committed `.env` file.
+
+```dotenv
+# Required
+TELEGRAM_BOT_TOKEN=...
+PAYBOX_API_KEY=...
+DATABASE_URL=postgres://user:password@host:5432/paybox
+RECONCILIATION_INTERVAL_MS=30000
+HEALTH_HOST=0.0.0.0
+HEALTH_PORT=3000
+
+# Optional, non-executing natural-language helper
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4o-mini
+
+# Keep these disabled until all transfer gates are completed.
+ENABLE_WALLET_TRANSFERS=false
+PAYBOX_TRANSFER_ADAPTER_CONFIRMED=false
+PAYBOX_WALLET_TRANSFERS_KILL_SWITCH=false
+```
+
+Do not configure `PAYBOX_SIGNING_KEY` in a public deployment while `/sign` remains gated. Rotate any token immediately if it is exposed in source control, CI logs, a terminal recording, or a Telegram message.
+
+## 4. Pre-deployment validation
+
+Run these checks in a clean build environment before every release:
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/paybox-telegram-bot.git
-cd paybox-telegram-bot
-
-# Install dependencies
-npm install
-
-# Create .env file
-cp .env.example .env
+npm ci
+npm test
+find src test -type f -name '*.js' -print0 | xargs -0 -n1 node --check
 ```
 
-### 2. Configure .env
+The repository’s GitHub Actions workflow runs the safety suite and syntax checks on pushes and pull requests. The PostgreSQL integration test runs when `TEST_DATABASE_URL` is supplied in a dedicated test environment. Add dependency and secret scanning before the first public beta.
 
-```
-TELEGRAM_BOT_TOKEN=your_token_from_botfather
-PAYBOX_API_KEY=pbx_live_your_api_key
-PAYBOX_SIGNING_KEY=pbxk1.your_signing_key_optional
-BOT_PORT=3000
-```
+## 5. Launch checklist
 
-### 3. Run Locally
+### Read-only / draft-only beta
 
-```bash
-npm start
-```
+- [ ] Configure `TELEGRAM_BOT_TOKEN` and `PAYBOX_API_KEY` through managed secrets.
+- [ ] Leave wallet transfers and signing disabled.
+- [ ] Create a private Telegram test group and restrict the bot’s exposure during initial validation.
+- [ ] Verify `/start`, `/help`, `/balance`, `/pay`, `/transfer`, `/wallet`, and `/services` with non-sensitive test accounts.
+- [ ] In a private chat, register a test receiving wallet with `/wallet SOL <address>` and confirm the address is not accepted from a group chat.
+- [ ] In a private test group, verify `tip 0.03 SOL` as a reply and `tip @username 2.4 SOL` for a registered recipient; confirm unregistered, self-tip, mismatched-reply, invalid-address, and duplicate-update cases are rejected.
+- [ ] Confirm that invalid amounts, unsupported assets, username recipients, and expired draft callbacks are rejected.
+- [ ] Confirm that logs contain correlation IDs and metadata only—not user message bodies or provider errors.
+- [ ] Configure uptime/error monitoring and a restart policy.
+- [ ] Verify `GET /healthz` returns HTTP 200 and `GET /readyz` returns HTTP 200 only after the bot worker, payment-intent store, and transfer gateway are initialized.
 
-The bot will start polling for messages. You can now interact with it on Telegram.
+### Before enabling wallet transfers
 
-## ☁️ Production Deployment
+- [ ] Verify that the installed Paybox SDK actually exposes the approved transfer operation and document its request/response contract.
+- [ ] Verify the exact amount-unit contract in controlled staging/testnet tests for ETH and SOL.
+- [ ] Deploy the PostgreSQL payment-intent schema with restricted runtime permissions. The bot runs the checked-in migration at startup and refuses production startup without `DATABASE_URL`.
+- [ ] Confirm idempotency keys and the conditional database claim enforce one provider request per confirmed intent, including tip intents.
+- [ ] Verify the durable reconciliation loop against the provider’s request-status contract; add an outbox-backed notification worker before promising Telegram tip status notifications.
+- [ ] Build integration tests for approval, denial, timeout, provider error, duplicated callback, process restart, and duplicate Telegram update cases.
+- [ ] Define a manual kill switch that stops new transfer creation without exposing configuration changes in chat.
+- [ ] Complete an independent security review and record a formal launch approval.
 
-### Option 1: Heroku (Easiest )
+## 6. Webhook hardening requirements
 
-1. **Create Heroku app**
+Telegram supports an optional `secret_token` that is delivered in the `X-Telegram-Bot-Api-Secret-Token` header for webhook requests.[1] A production webhook handler must:
 
-   ```bash
-   heroku create paybox-telegram-bot
-   ```
+1. Require HTTPS and verify the secret-token header using a constant-time comparison.
+2. Persist and deduplicate `update_id` values before processing side effects.
+3. Respond quickly, placing slow provider operations into durable jobs where appropriate.
+4. Use a shared intent store so any instance can validate ownership and state safely.
+5. Restrict allowed update types to those the bot needs, such as `message` and `callback_query`.
+6. Expose non-sensitive `/healthz` and `/readyz` endpoints for the hosting platform.
 
-1. **Add environment variables**
+## 7. Operational boundaries
 
-   ```python
-   heroku config:set TELEGRAM_BOT_TOKEN=your_token
-   heroku config:set PAYBOX_API_KEY=your_api_key
-   heroku config:set PAYBOX_SIGNING_KEY=your_signing_key
-   ```
+- The bot must not log Telegram message bodies by default because they may contain wallet addresses, private business data, or messages intended for signature.
+- Do not enable user-to-user transfers until recipient registration and verification are built. The hardened command flow currently accepts direct wallet addresses only.
+- Keep x402 service use as discovery-only until service checkout has its own intent, approval, spending-limit, and audit workflow.
+- Treat AI as assistance, not authorization. The current AI classifier may prepare guidance but cannot create money-moving requests.
 
-1. **Deploy**
+## 8. Incident response
 
-   ```python
-   git push heroku main
-   ```
+If you suspect misuse, provider-contract mismatch, or secret exposure:
 
-1. **View logs**
+1. Immediately set `PAYBOX_WALLET_TRANSFERS_KILL_SWITCH=true` and restart the worker. This stops new wallet-transfer requests even if enablement was previously requested.
+2. Rotate exposed Telegram, Paybox, OpenAI, and webhook credentials.
+3. Review Paybox request/audit history and correlation IDs from application logs.
+4. Preserve relevant logs securely, without broadening access to sensitive user data.
+5. Do not re-enable transfers until the root cause and corrective tests are documented.
 
-   ```bash
-   heroku logs --tail
-   ```
+## References
 
-### Option 2: Railway
-
-1. **Connect GitHub repository to Railway**
-
-1. **Add environment variables in Railway dashboard**
-
-1. **Deploy automatically**
-
-### Option 3: Fly.io
-
-1. **Install Fly CLI**
-
-   ```bash
-   curl -L https://fly.io/install.sh | sh
-   ```
-
-1. **Create app**
-
-   ```python
-   fly launch
-   ```
-
-1. **Set secrets**
-
-   ```bash
-   fly secrets set TELEGRAM_BOT_TOKEN=your_token
-   fly secrets set PAYBOX_API_KEY=your_api_key
-   ```
-
-1. **Deploy**
-
-   ```bash
-   fly deploy
-   ```
-
-### Option 4: Docker
-
-1. **Create Dockerfile**
-
-   ```
-   FROM node:18-alpine
-   WORKDIR /app
-   COPY package*.json ./
-   RUN npm ci --only=production
-   COPY src ./src
-   CMD ["node", "src/index.js"]
-   ```
-
-1. **Build image**
-
-   ```bash
-   docker build -t paybox-telegram-bot .
-   ```
-
-1. **Run container**
-
-   ```bash
-   docker run -e TELEGRAM_BOT_TOKEN=your_token \
-     -e PAYBOX_API_KEY=your_api_key \
-     paybox-telegram-bot
-   ```
-
-## 🔄 Webhook Setup (Advanced )
-
-For better performance at scale, use webhooks instead of polling:
-
-### 1. Update index.js
-
-```python
-import express from 'express';
-
-const app = express();
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
-
-// Setup commands and middleware...
-
-app.use(bot.webhookCallback('/telegram'));
-
-bot.telegram.setWebhook(`${process.env.BOT_WEBHOOK_URL}/telegram`);
-
-app.listen(process.env.BOT_PORT || 3000, () => {
-  console.log('Bot listening on webhook');
-});
-```
-
-### 2. Configure webhook URL
-
-```python
-heroku config:set BOT_WEBHOOK_URL=https://your-app.herokuapp.com
-```
-
-## 📊 Monitoring
-
-### Heroku Metrics
-
-```python
-heroku metrics
-```
-
-### Application Monitoring
-
-Consider using:
-
-- **Sentry** for error tracking
-
-- **LogRocket** for session replay
-
-- **New Relic** for performance monitoring
-
-## 🔒 Security Best Practices
-
-1. **Environment Variables**: Never commit `.env` file
-
-1. **API Keys**: Rotate regularly
-
-1. **Rate Limiting**: Implement to prevent abuse
-
-1. **Input Validation**: Sanitize all user inputs
-
-1. **HTTPS Only**: Always use HTTPS for webhooks
-
-1. **Secrets Management**: Use platform-specific secret managers
-
-## 📈 Scaling
-
-### Database for Sessions
-
-For production, replace in-memory sessions with Redis:
-
-```javascript
-import Redis from 'ioredis';
-
-const redis = new Redis(process.env.REDIS_URL );
-
-bot.use(async (ctx, next) => {
-  const userId = ctx.from?.id;
-  ctx.session = await redis.get(`session:${userId}`);
-  await next();
-  await redis.set(`session:${userId}`, JSON.stringify(ctx.session));
-});
-```
-
-### Load Balancing
-
-- Use multiple bot instances with the same token
-
-- Implement session persistence with Redis
-
-- Use webhook mode for better scalability
-
-## 🐛 Troubleshooting
-
-### Bot not responding
-
-1. Check `TELEGRAM_BOT_TOKEN` is correct
-
-1. Verify bot is running: `npm start`
-
-1. Check logs for errors
-
-### Paybox API errors
-
-1. Verify `PAYBOX_API_KEY` is valid
-
-1. Check Paybox API status
-
-1. Ensure credentials are granted in Paybox app
-
-### Memory leaks
-
-1. Monitor memory usage: `node --inspect src/index.js`
-
-1. Use Chrome DevTools for profiling
-
-1. Check for event listener leaks
-
-## 📝 Logging
-
-Add structured logging:
-
-```javascript
-import winston from 'winston';
-
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.json(),
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' }),
-  ],
-});
-
-bot.use((ctx, next) => {
-  logger.info(`${ctx.from?.username}: ${ctx.message?.text}`);
-  return next();
-});
-```
-
-## 🔄 CI/CD Pipeline
-
-### GitHub Actions Example
-
-```yaml
-name: Deploy to Heroku
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: akhileshns/heroku-deploy@v3.12.12
-        with:
-          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
-          heroku_app_name: paybox-telegram-bot
-          heroku_email: your-email@example.com
-```
-
-## 📞 Support
-
-- **Paybox Issues**: [https://docs.paybox.sh](https://docs.paybox.sh)
-
-- **Telegram Bot Issues**: [https://telegraf.js.org](https://telegraf.js.org)
-
-- **Hosting Issues**: Check platform-specific documentation
-
----
-
-**Happy deploying! 🚀**
-
+[1]: [Telegram Bot API — receiving updates and webhook secret tokens](https://core.telegram.org/bots/api#setwebhook)

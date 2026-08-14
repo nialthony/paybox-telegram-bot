@@ -1,39 +1,35 @@
 export async function helpCommand(ctx) {
   const helpMessage = `
-**📚 Available Commands**
+*📚 Available commands*
 
-**Wallet & Portfolio:**
-• /balance - Check your crypto portfolio across all chains
-• /pay - Send crypto to a user or address
-• /transfer - Send crypto to another wallet (legacy)
-• /sign - Sign a message with your wallet
+*Wallet*
+• /balance [wallet_address] — view a Paybox portfolio
+• /pay <wallet_address> <amount> <ETH|SOL> — create a validated payment draft
+• /transfer <wallet_address> <amount> <ETH|SOL> — legacy alias for /pay
+• /sign <message> — displays the current signing safety gate; no request is created
+• /wallet <ETH|SOL> <wallet_address> — register a wallet privately for receiving tips
+• tip <amount> <ETH|SOL> — reply to a user’s message to prepare a tip draft
+• tip @username <amount> <ETH|SOL> — prepare a tip draft for a registered username
 
-**Services & Payments:**
-• /services - Browse and use x402 services (flights, Amazon, APIs, etc.)
-• /email - Access your Paybox email inbox
-• /markets - Browse prediction markets
+*Discovery*
+• /services [query] — browse available x402 services (discovery only)
 
-**Account:**
-• /account - Manage your Paybox credentials
-• /history - View recent transactions
+*Examples*
+\`/balance 0x1111111111111111111111111111111111111111\`
+\`/pay 0x1111111111111111111111111111111111111111 0.25 ETH\`
+\`/pay 5EYjJb9TQHYYb9H1X6kzfYy9qCj8Kx4aTqWwVdQ7BvzP 1.5 SOL\`
+Reply to a user: \`tip 0.03 SOL\`
+\`tip @alice 2.4 SOL\`
+\`/wallet SOL 5EYjJb9TQHYYb9H1X6kzfYy9qCj8Kx4aTqWwVdQ7BvzP\`
+\`/sign hello world\`
+\`/services flights\`
 
-**Other:**
-• /help - Show this help message
-• /start - Show welcome message
-
-**Examples:**
-
-\`/balance\` - Shows your portfolio
-\`/pay @user 1.5 ETH\` - Send 1.5 ETH to a user
-\`/pay 0x123... 10 SOL\` - Send 10 SOL to address
-\`/sign hello world\` - Sign the message "hello world"
-\`/services flights\` - Search for flight booking services
-
-**Need help?**
-Visit https://docs.paybox.sh for full documentation.
+*Safety*
+• Natural-language messages never create payments.
+• Review the full destination and amount before confirming a draft.
+• A username is only resolved to an address after that user explicitly registers the wallet.
+• Wallet transfers are disabled until the Paybox transfer adapter is validated for the installed SDK version.
   `.trim();
 
-  await ctx.reply(helpMessage, {
-    parse_mode: 'Markdown',
-  });
+  await ctx.reply(helpMessage, { parse_mode: 'Markdown' });
 }

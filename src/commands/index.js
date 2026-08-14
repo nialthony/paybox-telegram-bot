@@ -1,84 +1,69 @@
 import { startCommand } from './start.js';
 import { balanceCommand } from './balance.js';
 import { transferCommand } from './transfer.js';
-import { payCommand } from './pay.js';
+import { payCommand, cancelPaymentCallback, confirmPaymentCallback } from './pay.js';
 import { signCommand } from './sign.js';
 import { servicesCommand } from './services.js';
+import { tipCommand } from './tip.js';
+import { walletCommand } from './wallet.js';
 import { helpCommand } from './help.js';
+import { reportError, replyWithSafeError } from '../lib/errors.js';
 
 export function setupCommands(bot) {
-  // Start command
   bot.start(startCommand);
-
-  // Help command
   bot.help(helpCommand);
-
-  // Balance command
   bot.command('balance', balanceCommand);
-
-  // Transfer command
   bot.command('transfer', transferCommand);
-
-  // Pay command
   bot.command('pay', payCommand);
-
-  // Sign command
   bot.command('sign', signCommand);
-
-  // Services command (x402 services)
   bot.command('services', servicesCommand);
+  bot.command('tip', tipCommand);
+  bot.command('wallet', walletCommand);
 
-  // Handle text messages (AI Agent Mode)
+  bot.action(/^payment:(confirm|cancel):([a-f0-9-]{36})$/, async (ctx) => {
+    const [, action, intentId] = ctx.match;
+    if (action === 'confirm') {
+      return confirmPaymentCallback(ctx, intentId);
+    }
+    return cancelPaymentCallback(ctx, intentId);
+  });
+
   bot.on('text', async (ctx) => {
-    if (ctx.message.text.startsWith('/')) {
-      return;
-    }
-
     const text = ctx.message.text;
-    
-    // If OpenAI API key is not set, fallback to simple message
-    if (!process.env.OPENAI_API_KEY) {
-      return ctx.reply('👋 I\'m a Paybox bot! Connect an AI key to enable Natural Language Mode, or use /help.');
-    }
+    if (text.startsWith('/')) return;
+    if (/^tip(?:\s|$)/i.test(text.trim())) return tipCommand(ctx);
 
-    await ctx.reply('🧠 Thinking...');
+    if (!ctx.agent.enabled) {
+      return ctx.reply('👋 Natural-language assistance is disabled. Use /help to see available commands.');
+    }
 
     try {
-      const aiResult = await ctx.agent.processMessage(text, ctx);
-      
-      if (aiResult.intent === 'chat') {
-        return ctx.reply(aiResult.reply);
+      const aiResult = await ctx.agent.processMessage(text);
+      if (aiResult.intent === 'balance') {
+        await ctx.reply(aiResult.reply);
+        return balanceCommand(ctx);
       }
 
-      // Map AI intent to bot commands
-      let cmdMsg = aiResult.reply + "\n\n";
-      
-      switch (aiResult.intent) {
-        case 'balance':
-          cmdMsg += "🔄 Executing: `/balance`";
-          await ctx.reply(cmdMsg, { parse_mode: 'Markdown' });
-          return balanceCommand(ctx);
-        
-        case 'pay':
-          const { recipient, amount, token } = aiResult.params;
-          cmdMsg += `🔄 Executing: \`/pay ${recipient} ${amount} ${token || 'ETH'}\``;
-          await ctx.reply(cmdMsg, { parse_mode: 'Markdown' });
-          // Mock the context message for the command
-          ctx.message.text = `/pay ${recipient} ${amount} ${token || 'ETH'}`;
-          return payCommand(ctx);
-
-        case 'services':
-          cmdMsg += `🔄 Executing: \`/services ${aiResult.params.query}\``;
-          await ctx.reply(cmdMsg, { parse_mode: 'Markdown' });
-          ctx.message.text = `/services ${aiResult.params.query}`;
-          return servicesCommand(ctx);
-
-        default:
-          return ctx.reply(aiResult.reply);
+      if (aiResult.intent === 'payment_draft') {
+        return ctx.reply(
+          `${aiResult.reply}\n\nFor your security, I will not initiate a payment from natural language. Verify the destination and submit a direct command: \`/pay <wallet_address> <amount> <ETH|SOL>\`.`,
+          { parse_mode: 'Markdown' },
+        );
       }
+
+      if (aiResult.intent === 'services') {
+        const query = aiResult.params.query ? ` ${aiResult.params.query}` : '';
+        return ctx.reply(`${aiResult.reply}\n\nUse \`/services${query}\` to browse services.`, { parse_mode: 'Markdown' });
+      }
+
+      return ctx.reply(aiResult.reply);
     } catch (error) {
-      console.error('Agent processing error:', error);
-      ctx.reply('❌ Sorry, I couldn\'t process that request.');
+      const referenceId = reportError({
+        scope: 'ai_router',
+        error,
+        context: { telegramUserId: ctx.from?.id, chatId: ctx.chat?.id },
+      });
+      return replyWithSafeError(ctx, { referenceId, message: 'I could not process that request.' });
     }
   });
 }

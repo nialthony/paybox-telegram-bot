@@ -1,127 +1,161 @@
-export async function payCommand(ctx) {
-  const args = ctx.message.text.split(' ').slice(1);
+import { PaymentInputError, parsePaymentCommand } from '../domain/payment.js';
+import { PaymentIntentError } from '../services/payment-intents.js';
+import { WalletTransferGatewayError } from '../services/wallet-transfer-gateway.js';
+import { escapeMarkdown, reportError, replyWithSafeError } from '../lib/errors.js';
 
-  if (args.length < 2) {
-    await ctx.reply(
-      '❌ **Usage**: `/pay <@user|address> <amount> [token]`\n\n' +
-      '**Examples**:\n' +
-      '• `/pay @cryptoking 1.5 ETH`\n' +
-      '• `/pay 0x123... 10 SOL`',
-      { parse_mode: 'Markdown' }
-    );
-    return;
+export function getWalletCredentialId(credentials) {
+  const wallet = credentials.find((summary) =>
+    summary?.credential?.credential_type === 'wallet'
+    || summary?.credential?.kind === 'wallet'
+    || summary?.kind === 'wallet',
+  );
+  const credentialId = wallet?.credential?.id || wallet?.credential_id;
+
+  if (!credentialId) {
+    throw new PaymentIntentError('No wallet credential is available for this request.');
   }
 
-  const [recipientInput, amount, tokenInput = 'ETH'] = args;
-  const token = tokenInput.toUpperCase();
+  return credentialId;
+}
 
+function confirmationKeyboard(intentId) {
+  return {
+    inline_keyboard: [[
+      { text: 'Review and create request', callback_data: `payment:confirm:${intentId}` },
+      { text: 'Cancel', callback_data: `payment:cancel:${intentId}` },
+    ]],
+  };
+}
+
+function formatDraft(draft) {
+  return [
+    '🔎 *Payment draft — no transfer has been requested yet*',
+    '',
+    `To: \`${escapeMarkdown(draft.recipient)}\``,
+    `Amount: *${escapeMarkdown(draft.displayAmount)} ${draft.asset}*`,
+    `Network: \`${escapeMarkdown(draft.chain)}\``,
+    '',
+    'Confirm only after checking the destination address and amount. This draft expires in 15 minutes.',
+  ].join('\n');
+}
+
+export async function payCommand(ctx, commandText = ctx.message?.text) {
   try {
-    // 1. Check if Sender has Paybox setup
-    const { credentials } = await ctx.paybox.listCredentials();
-    
-    if (!credentials || credentials.length === 0) {
-      await ctx.reply(
-        '⚠️ **Paybox Setup Required**\n\n' +
-        'You haven\'t connected your Paybox account yet. To send payments, please:\n' +
-        '1. Go to [app.paybox.sh](https://app.paybox.sh)\n' +
-        '2. Connect your wallet\n' +
-        '3. Grant permissions to this bot',
-        { parse_mode: 'Markdown' }
-      );
-      return;
-    }
-
-    // Find appropriate wallet credential
-    const walletCredential = credentials.find((c) => c.kind === 'wallet');
-    if (!walletCredential) {
-      await ctx.reply('❌ **No Wallet Found**: Please grant this bot access to a wallet in your Paybox settings.');
-      return;
-    }
-
-    // 2. Resolve Recipient
-    let recipientAddress = recipientInput;
-    
-    if (recipientInput.startsWith('@')) {
-      // In a real app, you would look this up in a database
-      // For this demo, we'll simulate a check
-      await ctx.reply(`🔍 Resolving user ${recipientInput}...`);
-      
-      // Simulation: Only @paybox_dev is "registered" for the demo
-      if (recipientInput.toLowerCase() === '@paybox_dev') {
-        recipientAddress = '0x742d35Cc6634C0532925a3b844Bc9e7595f2bEb'; // Demo address
-      } else {
-        await ctx.reply(
-          `❌ **User Not Found**: ${recipientInput} has not registered their wallet with this bot yet.\n\n` +
-          `Ask them to run \`/start\` and connect their Paybox account!`
-        );
-        return;
-      }
-    }
-
-    await ctx.reply(
-      `⏳ **Initiating Payment**\n\n` +
-      `**To**: \`${recipientAddress}\`\n` +
-      `**Amount**: ${amount} ${token}\n\n` +
-      `_Checking network status..._`,
-      { parse_mode: 'Markdown' }
-    );
-
-    // 3. Determine chain
-    let chain;
-    if (token === 'SOL') {
-      chain = 'solana:5eykt4UsFv2P6tnw2qTr3tWUomtW5oGS5zgziYyQd53';
-    } else if (token === 'ETH') {
-      chain = 'eip155:1';
-    } else {
-      await ctx.reply('❌ **Unsupported Token**: Currently supports ETH and SOL.');
-      return;
-    }
-
-    // 4. Request transfer via Paybox
-    const transfer = await ctx.paybox.requestTransfer({
-      credentialId: walletCredential.credential_id,
-      chain,
-      to: recipientAddress,
-      amount: (parseFloat(amount) * 1e18).toString(), // Simplified conversion
+    const draft = parsePaymentCommand(commandText);
+    const intent = await ctx.paymentIntents.createDraft({
+      telegramUserId: ctx.from?.id,
+      chatId: ctx.chat?.id,
+      draft,
     });
 
-    if (transfer.status === 'pending_approval') {
-      await ctx.reply(
-        `🔐 **Approval Required**\n\n` +
-        `Please approve this payment using your Paybox passkey.\n\n` +
-        `[👉 Approve Now](${transfer.approval_url})`,
-        {
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [[{ text: '✅ Open Paybox', url: transfer.approval_url }]],
-          },
-        }
-      );
-      
-      pollStatus(ctx, transfer.request_id);
-    } else if (transfer.status === 'success') {
-      await ctx.reply(`✅ **Payment Sent!**\n\nHash: \`${transfer.output.transaction_hash}\``, { parse_mode: 'Markdown' });
-    } else {
-      await ctx.reply(`❌ **Payment Failed**: ${transfer.status}`);
+    await ctx.reply(formatDraft(draft), {
+      parse_mode: 'Markdown',
+      reply_markup: confirmationKeyboard(intent.id),
+    });
+  } catch (error) {
+    if (error instanceof PaymentInputError || error instanceof PaymentIntentError) {
+      await ctx.reply(`❌ ${error.message}`);
+      return;
     }
 
-  } catch (error) {
-    console.error('Pay error:', error);
-    await ctx.reply(`❌ **Error**: ${error.message}`);
+    const referenceId = reportError({
+      scope: 'payment_draft',
+      error,
+      context: { telegramUserId: ctx.from?.id, chatId: ctx.chat?.id },
+    });
+    await replyWithSafeError(ctx, { referenceId, message: 'We could not create a payment draft.' });
   }
 }
 
-async function pollStatus(ctx, requestId, attempts = 0) {
-  if (attempts > 20) return;
-
+export async function confirmPaymentCallback(ctx, intentId) {
+  let claimedIntentId = null;
   try {
-    const request = await ctx.paybox.getRequest(requestId);
-    if (request.status === 'success') {
-      await ctx.reply(`✅ **Payment Confirmed!**\n\nTransaction Hash: \`${request.output.transaction_hash}\``, { parse_mode: 'Markdown' });
-    } else if (['denied', 'error'].includes(request.status)) {
-      await ctx.reply(`❌ **Payment ${request.status === 'denied' ? 'Rejected' : 'Failed'}**`);
-    } else {
-      setTimeout(() => pollStatus(ctx, requestId, attempts + 1), 5000);
+    const activeIntent = await ctx.paymentIntents.getOwnedActiveIntent({
+      id: intentId,
+      telegramUserId: ctx.from?.id,
+      chatId: ctx.chat?.id,
+    });
+
+    if (!ctx.transferGateway.enabled) {
+      await ctx.answerCbQuery('Wallet transfers are not enabled.');
+      await ctx.reply('⚠️ Wallet transfers are currently disabled until the Paybox transfer adapter is verified for this SDK version. No request was created.');
+      return;
     }
-  } catch (e) {}
+
+    const intent = await ctx.paymentIntents.claimForCreation({
+      id: activeIntent.id,
+      telegramUserId: ctx.from?.id,
+      chatId: ctx.chat?.id,
+    });
+    claimedIntentId = intent.id;
+    const credentials = await ctx.paybox.listCredentials();
+    const credentialId = getWalletCredentialId(credentials);
+
+    const transfer = await ctx.transferGateway.createTransferRequest({
+      credentialId,
+      draft: intent.draft,
+    });
+
+    const providerRequestId = transfer.request_id || transfer.id || null;
+    if (transfer.status === 'pending_approval') {
+      await ctx.paymentIntents.transition(intent.id, 'pending_approval', { providerRequestId, providerStatus: transfer.status });
+      await ctx.answerCbQuery('Approval is required in Paybox.');
+      await ctx.reply(
+        '🔐 *Approval required*\n\nApprove this request in Paybox. The bot will not poll in-memory; check the request status in Paybox until durable webhook processing is configured.',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: transfer.approval_url
+            ? { inline_keyboard: [[{ text: 'Open Paybox approval', url: transfer.approval_url }]] }
+            : undefined,
+        },
+      );
+      return;
+    }
+
+    if (transfer.status === 'success') {
+      await ctx.paymentIntents.transition(intent.id, 'succeeded', { providerRequestId, providerStatus: transfer.status });
+      await ctx.answerCbQuery('Payment request completed.');
+      await ctx.reply('✅ Payment request completed. Verify the transaction in Paybox before treating it as final.');
+      return;
+    }
+
+    await ctx.paymentIntents.transition(intent.id, 'failed', { providerRequestId, providerStatus: transfer.status });
+    await ctx.answerCbQuery('Payment request was not accepted.');
+    await ctx.reply('❌ Paybox did not accept the payment request. No further action was taken.');
+  } catch (error) {
+    if (claimedIntentId) {
+      await ctx.paymentIntents.transition(claimedIntentId, 'failed');
+    }
+    if (error instanceof PaymentIntentError || error instanceof WalletTransferGatewayError) {
+      await ctx.answerCbQuery(error.message).catch(() => {});
+      await ctx.reply(`❌ ${error.message}`);
+      return;
+    }
+
+    const referenceId = reportError({
+      scope: 'payment_confirm',
+      error,
+      context: { telegramUserId: ctx.from?.id, chatId: ctx.chat?.id, intentId },
+    });
+    await ctx.answerCbQuery('Unable to create the payment request.').catch(() => {});
+    await replyWithSafeError(ctx, { referenceId, message: 'We could not create the payment request.' });
+  }
+}
+
+export async function cancelPaymentCallback(ctx, intentId) {
+  try {
+    await ctx.paymentIntents.cancel({
+      id: intentId,
+      telegramUserId: ctx.from?.id,
+      chatId: ctx.chat?.id,
+    });
+    await ctx.answerCbQuery('Payment draft cancelled.');
+    await ctx.reply('✅ Payment draft cancelled. No provider request was created.');
+  } catch (error) {
+    const message = error instanceof PaymentIntentError
+      ? error.message
+      : 'We could not cancel that payment draft.';
+    await ctx.answerCbQuery(message).catch(() => {});
+    await ctx.reply(`❌ ${message}`);
+  }
 }

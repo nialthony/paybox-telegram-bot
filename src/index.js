@@ -4,42 +4,100 @@ import dotenv from 'dotenv';
 import { setupCommands } from './commands/index.js';
 import { setupMiddleware } from './middleware/index.js';
 import { PayboxAgent } from './agent/index.js';
+import { loadConfig } from './config.js';
+import { PaymentIntentStore } from './services/payment-intents.js';
+import { PostgresPaymentIntentStore } from './services/postgres-payment-intents.js';
+import { startReconciliationLoop } from './services/reconciliation.js';
+import { createWalletTransferGateway } from './services/wallet-transfer-gateway.js';
+import { reportError } from './lib/errors.js';
+import { checkStoreReadiness, createHealthServer } from './lib/health.js';
 
 dotenv.config();
 
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
-
-// Initialize AI Agent
-const agent = new PayboxAgent(process.env.OPENAI_API_KEY);
-bot.context.agent = agent;
-
-// Initialize Paybox client
+const config = loadConfig();
+const bot = new Telegraf(config.telegramBotToken);
 const paybox = PayboxClient.fromConfig({
-  apiKey: process.env.PAYBOX_API_KEY,
-  signingKey: process.env.PAYBOX_SIGNING_KEY,
+  apiKey: config.payboxApiKey,
+  signingKey: config.payboxSigningKey,
 });
 
-// Attach paybox to bot context
 bot.context.paybox = paybox;
+bot.context.agent = new PayboxAgent(config.openAiApiKey, { model: config.openAiModel });
+const paymentIntents = config.databaseUrl
+  ? PostgresPaymentIntentStore.fromConnectionString({ connectionString: config.databaseUrl })
+  : new PaymentIntentStore();
 
-// Setup middleware
+if (typeof paymentIntents.initialize === 'function') {
+  await paymentIntents.initialize();
+}
+
+bot.context.paymentIntents = paymentIntents;
+bot.context.walletProfiles = paymentIntents;
+bot.context.transferGateway = createWalletTransferGateway({
+  paybox,
+  enabled: config.walletTransfersEnabled,
+});
+
 setupMiddleware(bot);
-
-// Setup commands
 setupCommands(bot);
 
-// Error handling
-bot.catch((err, ctx) => {
-  console.error('Bot error:', err);
-  ctx.reply('❌ An error occurred. Please try again later.').catch(() => {});
+const reconciliationLoop = startReconciliationLoop({
+  store: paymentIntents,
+  gateway: bot.context.transferGateway,
+  intervalMs: config.reconciliationIntervalMs,
 });
 
-// Start bot
-bot.launch();
+let botReady = false;
 
-console.log('🤖 Paybox Telegram Bot started!');
-console.log('📱 Bot is ready to receive messages');
+const healthServer = createHealthServer({
+  host: config.healthHost,
+  port: config.healthPort,
+  getReadiness: async () => {
+    const checks = {
+      bot: botReady,
+      paymentIntents: false,
+      transferGateway: Boolean(bot.context.transferGateway),
+    };
+    try {
+      checks.paymentIntents = await checkStoreReadiness(paymentIntents);
+    } catch (error) {
+      reportError({ scope: 'readiness_check', error });
+    }
+    return { ready: Object.values(checks).every(Boolean), checks };
+  },
+});
 
-// Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+bot.catch(async (error, ctx) => {
+  const referenceId = reportError({
+    scope: 'bot_update',
+    error,
+    context: { telegramUserId: ctx.from?.id, chatId: ctx.chat?.id, updateType: ctx.updateType },
+  });
+  await ctx.reply(`❌ We could not process that update. Reference: \`${referenceId}\``, { parse_mode: 'Markdown' }).catch(() => {});
+});
+
+try {
+  await healthServer.listen();
+  await bot.launch({ allowedUpdates: ['message', 'callback_query'] });
+  botReady = true;
+} catch (error) {
+  await healthServer.close().catch(() => {});
+  reconciliationLoop.stop();
+  if (typeof paymentIntents.close === 'function') await paymentIntents.close().catch(() => {});
+  throw error;
+}
+
+console.log('Paybox Telegram Bot started.');
+console.log(`Health server listening on ${config.healthHost}:${config.healthPort}`);
+console.log(`Wallet transfer requests: ${config.walletTransfersKillSwitch ? 'disabled (emergency kill switch)' : config.walletTransfersEnabled ? 'enabled' : 'disabled'}`);
+
+const shutdown = async (signal) => {
+  botReady = false;
+  reconciliationLoop.stop();
+  bot.stop(signal);
+  await healthServer.close().catch(() => {});
+  if (typeof paymentIntents.close === 'function') await paymentIntents.close();
+};
+
+process.once('SIGINT', () => { void shutdown('SIGINT'); });
+process.once('SIGTERM', () => { void shutdown('SIGTERM'); });

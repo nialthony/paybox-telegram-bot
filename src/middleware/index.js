@@ -1,37 +1,57 @@
-export function setupMiddleware(bot) {
-  // Logging middleware
-  bot.use(async (ctx, next) => {
-    const start = Date.now();
-    console.log(`[${new Date().toISOString()}] ${ctx.from?.username || ctx.from?.id} - ${ctx.message?.text || ctx.update.callback_query?.data || 'unknown'}`);
-    await next();
-    const ms = Date.now() - start;
-    console.log(`Response time: ${ms}ms`);
-  });
+import { reportError, replyWithSafeError } from '../lib/errors.js';
 
-  // Session middleware (in-memory for demo, use Redis for production)
-  const sessions = new Map();
-  bot.use(async (ctx, next) => {
-    const userId = ctx.from?.id;
-    if (!sessions.has(userId)) {
-      sessions.set(userId, {
-        userId,
-        username: ctx.from?.username,
-        state: 'idle',
-        data: {},
-      });
+export function createRateLimiter({ windowMs = 60_000, maxRequests = 20, now = () => Date.now() } = {}) {
+  const requests = new Map();
+
+  return function isAllowed(userId) {
+    if (!userId) return true;
+    const cutoff = now() - windowMs;
+    const recent = (requests.get(String(userId)) || []).filter((timestamp) => timestamp > cutoff);
+
+    if (recent.length >= maxRequests) {
+      requests.set(String(userId), recent);
+      return false;
     }
-    ctx.session = sessions.get(userId);
-    await next();
-  });
 
-  // Error handling middleware
+    recent.push(now());
+    requests.set(String(userId), recent);
+    return true;
+  };
+}
+
+export function setupMiddleware(bot) {
+  const isAllowed = createRateLimiter();
+
   bot.use(async (ctx, next) => {
     try {
       await next();
-    } catch (err) {
-      console.error('Middleware error:', err);
-      const errorMsg = err.message || 'An error occurred';
-      ctx.reply(`❌ Error: ${errorMsg}`).catch(() => {});
+    } catch (error) {
+      const referenceId = reportError({
+        scope: 'middleware',
+        error,
+        context: { telegramUserId: ctx.from?.id, chatId: ctx.chat?.id, updateType: ctx.updateType },
+      });
+      await replyWithSafeError(ctx, { referenceId, message: 'We could not process that request.' }).catch(() => {});
     }
+  });
+
+  bot.use(async (ctx, next) => {
+    if (!isAllowed(ctx.from?.id)) {
+      await ctx.reply('⚠️ Too many requests. Please wait a minute and try again.');
+      return;
+    }
+    await next();
+  });
+
+  bot.use(async (ctx, next) => {
+    const start = Date.now();
+    await next();
+    console.log({
+      event: 'telegram_update_processed',
+      telegramUserId: ctx.from?.id,
+      chatId: ctx.chat?.id,
+      updateType: ctx.updateType,
+      durationMs: Date.now() - start,
+    });
   });
 }

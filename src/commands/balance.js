@@ -1,55 +1,98 @@
+import { PaymentInputError, validateSupportedWalletAddress } from '../domain/payment.js';
+import { escapeMarkdown, reportError, replyWithSafeError } from '../lib/errors.js';
+
+function usd(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
+}
+
+function findWalletAddressInCredentials(credentials) {
+  for (const summary of credentials) {
+    const credential = summary?.credential || summary;
+    if (credential?.credential_type !== 'wallet' && credential?.kind !== 'wallet') continue;
+    const metadata = credential?.metadata || {};
+    const candidate = metadata.address || metadata.wallet_address || metadata.walletAddress || metadata.public_address || metadata.publicKey;
+    if (typeof candidate === 'string') {
+      try {
+        return validateSupportedWalletAddress(candidate);
+      } catch {
+        // Try the next credential; the final message asks for an explicit address.
+      }
+    }
+  }
+  return null;
+}
+
+function requestedAddress(ctx) {
+  return ctx.message?.text?.split(/\s+/).slice(1).join(' ').trim() || null;
+}
+
 export async function balanceCommand(ctx) {
   try {
     await ctx.reply('⏳ Fetching your portfolio...');
+    const credentials = await ctx.paybox.listCredentials();
 
-    const { credentials } = await ctx.paybox.listCredentials();
-
-    if (credentials.length === 0) {
-      await ctx.reply('❌ No credentials found. Please connect your wallet first at https://app.paybox.sh');
+    if (!credentials.length) {
+      await ctx.reply('❌ No Paybox credentials are available. Connect a wallet in Paybox before using /balance.');
       return;
     }
 
-    // Get portfolio for all wallets
-    const portfolio = await ctx.paybox.getPortfolio();
+    const address = requestedAddress(ctx)
+      ? validateSupportedWalletAddress(requestedAddress(ctx))
+      : findWalletAddressInCredentials(credentials);
 
-    if (!portfolio || portfolio.total_usd === null) {
-      await ctx.reply('📊 Portfolio is empty or no pricing data available.');
+    if (!address) {
+      await ctx.reply('⚠️ Provide a wallet address: `/balance <Ethereum_or_Solana_wallet_address>`', { parse_mode: 'Markdown' });
       return;
     }
 
-    // Format portfolio message
-    let message = `💰 **Your Portfolio**\n\n`;
-    message += `**Total Value:** $${portfolio.total_usd?.toFixed(2) || '0.00'} USD\n\n`;
+    const portfolio = await ctx.paybox.getPortfolio({ address });
+    if (!portfolio || portfolio.total_usd === null || portfolio.total_usd === undefined) {
+      await ctx.reply('📊 Your portfolio is empty or current pricing data is unavailable.');
+      return;
+    }
 
-    if (portfolio.wallets && portfolio.wallets.length > 0) {
-      message += `**Wallets:**\n`;
-      for (const wallet of portfolio.wallets) {
-        message += `• ${wallet.wallet_name || wallet.wallet_address.slice(0, 10)}...\n`;
-        message += `  Balance: $${wallet.total_usd?.toFixed(2) || '0.00'}\n`;
+    const lines = [
+      '💰 *Your portfolio*',
+      '',
+      `*Address:* \`${escapeMarkdown(address)}\``,
+      `*Total value:* $${usd(portfolio.total_usd)} USD`,
+    ];
+
+    if (portfolio.wallets?.length) {
+      lines.push('', '*Wallets:*');
+      for (const wallet of portfolio.wallets.slice(0, 10)) {
+        const label = escapeMarkdown(wallet.wallet_name || String(wallet.wallet_address || 'Unknown wallet').slice(0, 10));
+        lines.push(`• ${label} — $${usd(wallet.total_usd)}`);
       }
     }
 
-    if (portfolio.holdings && portfolio.holdings.length > 0) {
-      message += `\n**Holdings:**\n`;
+    if (portfolio.holdings?.length) {
+      lines.push('', '*Holdings:*');
       for (const holding of portfolio.holdings.slice(0, 10)) {
-        // Show top 10 holdings
-        const symbol = holding.symbol || 'Unknown';
-        const amount = holding.balance?.ui_amount_string || '0';
-        const usd = holding.priced_usd?.toFixed(2) || '0.00';
-        const change = holding.priceChange24h
-          ? ` (${(holding.priceChange24h * 100).toFixed(1)}%)`
-          : '';
-        message += `• ${symbol}: ${amount} ($${usd})${change}\n`;
+        const symbol = escapeMarkdown(holding.symbol || 'Unknown');
+        const amount = escapeMarkdown(holding.balance?.ui_amount_string || '0');
+        const change = Number(holding.priceChange24h);
+        const changeText = Number.isFinite(change) ? ` (${(change * 100).toFixed(1)}%)` : '';
+        lines.push(`• ${symbol}: ${amount} ($${usd(holding.priced_usd)})${changeText}`);
       }
     }
 
-    message += `\n_Last updated: ${new Date(portfolio.as_of).toLocaleTimeString()}_`;
+    if (portfolio.as_of) {
+      lines.push('', `_Last updated: ${escapeMarkdown(new Date(portfolio.as_of).toLocaleTimeString())}_`);
+    }
 
-    await ctx.reply(message, {
-      parse_mode: 'Markdown',
-    });
+    await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
   } catch (error) {
-    console.error('Balance command error:', error);
-    await ctx.reply(`❌ Error fetching portfolio: ${error.message}`);
+    if (error instanceof PaymentInputError) {
+      await ctx.reply(`❌ ${error.message}`);
+      return;
+    }
+    const referenceId = reportError({
+      scope: 'balance',
+      error,
+      context: { telegramUserId: ctx.from?.id, chatId: ctx.chat?.id },
+    });
+    await replyWithSafeError(ctx, { referenceId, message: 'We could not retrieve the portfolio.' });
   }
 }

@@ -1,0 +1,39 @@
+name: Validate bot safety controls
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Run safety test suite
+        run: npm test
+
+      - name: Check JavaScript syntax
+        run: find src test -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      - name: Validate Docker Compose configuration
+        run: cp .env.docker.example .env && docker compose --env-file .env config --quiet
+
+      - name: Surface production dependency risk
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high
