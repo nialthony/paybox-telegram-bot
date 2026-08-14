@@ -4,7 +4,10 @@ import { readFileSync } from 'node:fs';
 import { PaymentIntentError } from './payment-intents.js';
 
 const { Pool } = pg;
-const MIGRATION_SQL = readFileSync(new URL('../../db/migrations/001_payment_intents.sql', import.meta.url), 'utf8');
+const MIGRATION_SQL = [
+  '001_payment_intents.sql',
+  '002_wallet_profiles.sql',
+].map((fileName) => readFileSync(new URL(`../../db/migrations/${fileName}`, import.meta.url), 'utf8')).join('\n');
 const TERMINAL_STATES = new Set(['cancelled', 'expired', 'failed', 'succeeded']);
 const ALLOWED_TRANSITIONS = new Map([
   ['awaiting_confirmation', new Set(['creating', 'expired', 'cancelled'])],
@@ -73,6 +76,47 @@ export class PostgresPaymentIntentStore {
 
   async close() {
     await this.pool.end();
+  }
+
+  async registerWalletProfile({ telegramUserId, telegramUsername, asset, walletAddress }) {
+    const result = await this.pool.query(
+      `INSERT INTO wallet_profiles (telegram_user_id, telegram_username, asset, wallet_address)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (telegram_user_id, asset)
+       DO UPDATE SET telegram_username = EXCLUDED.telegram_username,
+                     wallet_address = EXCLUDED.wallet_address,
+                     updated_at = NOW()
+       RETURNING telegram_user_id, telegram_username, asset, wallet_address`,
+      [String(telegramUserId), telegramUsername || null, asset, walletAddress],
+    );
+    const row = result.rows[0];
+    return {
+      telegramUserId: row.telegram_user_id,
+      telegramUsername: row.telegram_username,
+      asset: row.asset,
+      walletAddress: row.wallet_address,
+    };
+  }
+
+  async getWalletProfile({ telegramUserId, telegramUsername, asset }) {
+    const result = await this.pool.query(
+      `SELECT telegram_user_id, telegram_username, asset, wallet_address
+       FROM wallet_profiles
+       WHERE asset = $3::text
+         AND (telegram_user_id = $1::text OR ($2::text IS NOT NULL AND LOWER(telegram_username) = LOWER($2::text)))
+       ORDER BY CASE WHEN telegram_user_id = $1::text THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [String(telegramUserId || ''), telegramUsername || null, asset],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          telegramUserId: row.telegram_user_id,
+          telegramUsername: row.telegram_username,
+          asset: row.asset,
+          walletAddress: row.wallet_address,
+        }
+      : null;
   }
 
   async createDraft({ telegramUserId, chatId, draft, idempotencyKey = randomUUID() }) {

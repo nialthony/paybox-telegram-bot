@@ -32,6 +32,7 @@ if (typeof paymentIntents.initialize === 'function') {
 }
 
 bot.context.paymentIntents = paymentIntents;
+bot.context.walletProfiles = paymentIntents;
 bot.context.transferGateway = createWalletTransferGateway({
   paybox,
   enabled: config.walletTransfersEnabled,

@@ -14,10 +14,38 @@ export class PaymentIntentStore {
     this.ttlMs = ttlMs;
     this.now = now;
     this.intents = new Map();
+    this.walletProfiles = new Map();
   }
 
   async checkHealth() {
     return true;
+  }
+
+  registerWalletProfile({ telegramUserId, telegramUsername, asset, walletAddress }) {
+    const userKey = `${String(telegramUserId)}:${asset}`;
+    const previous = this.walletProfiles.get(userKey);
+    if (previous?.telegramUsername) {
+      this.walletProfiles.delete(`@${previous.telegramUsername.toLowerCase()}:${asset}`);
+    }
+    const profile = Object.freeze({
+      telegramUserId: String(telegramUserId),
+      telegramUsername: telegramUsername || null,
+      asset,
+      walletAddress,
+    });
+    this.walletProfiles.set(userKey, profile);
+    if (profile.telegramUsername) {
+      this.walletProfiles.set(`@${profile.telegramUsername.toLowerCase()}:${asset}`, profile);
+    }
+    return profile;
+  }
+
+  getWalletProfile({ telegramUserId, telegramUsername, asset }) {
+    return this.walletProfiles.get(`${String(telegramUserId || '')}:${asset}`)
+      || (telegramUsername
+        ? this.walletProfiles.get(`@${String(telegramUsername).replace(/^@/, '').toLowerCase()}:${asset}`)
+        : null)
+      || null;
   }
 
   createDraft({ telegramUserId, chatId, draft }) {

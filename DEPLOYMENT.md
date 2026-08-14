@@ -69,7 +69,9 @@ The repository’s GitHub Actions workflow runs the safety suite and syntax chec
 - [ ] Configure `TELEGRAM_BOT_TOKEN` and `PAYBOX_API_KEY` through managed secrets.
 - [ ] Leave wallet transfers and signing disabled.
 - [ ] Create a private Telegram test group and restrict the bot’s exposure during initial validation.
-- [ ] Verify `/start`, `/help`, `/balance`, `/pay`, `/transfer`, and `/services` with non-sensitive test accounts.
+- [ ] Verify `/start`, `/help`, `/balance`, `/pay`, `/transfer`, `/wallet`, and `/services` with non-sensitive test accounts.
+- [ ] In a private chat, register a test receiving wallet with `/wallet SOL <address>` and confirm the address is not accepted from a group chat.
+- [ ] In a private test group, verify `tip 0.03 SOL` as a reply and `tip @username 2.4 SOL` for a registered recipient; confirm unregistered, self-tip, mismatched-reply, invalid-address, and duplicate-update cases are rejected.
 - [ ] Confirm that invalid amounts, unsupported assets, username recipients, and expired draft callbacks are rejected.
 - [ ] Confirm that logs contain correlation IDs and metadata only—not user message bodies or provider errors.
 - [ ] Configure uptime/error monitoring and a restart policy.
@@ -80,8 +82,8 @@ The repository’s GitHub Actions workflow runs the safety suite and syntax chec
 - [ ] Verify that the installed Paybox SDK actually exposes the approved transfer operation and document its request/response contract.
 - [ ] Verify the exact amount-unit contract in controlled staging/testnet tests for ETH and SOL.
 - [ ] Deploy the PostgreSQL payment-intent schema with restricted runtime permissions. The bot runs the checked-in migration at startup and refuses production startup without `DATABASE_URL`.
-- [ ] Confirm idempotency keys and the conditional database claim enforce one provider request per confirmed intent.
-- [ ] Verify the durable reconciliation loop against the provider’s request-status contract; add an outbox-backed notification worker before promising Telegram status notifications.
+- [ ] Confirm idempotency keys and the conditional database claim enforce one provider request per confirmed intent, including tip intents.
+- [ ] Verify the durable reconciliation loop against the provider’s request-status contract; add an outbox-backed notification worker before promising Telegram tip status notifications.
 - [ ] Build integration tests for approval, denial, timeout, provider error, duplicated callback, process restart, and duplicate Telegram update cases.
 - [ ] Define a manual kill switch that stops new transfer creation without exposing configuration changes in chat.
 - [ ] Complete an independent security review and record a formal launch approval.

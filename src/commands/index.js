@@ -4,6 +4,8 @@ import { transferCommand } from './transfer.js';
 import { payCommand, cancelPaymentCallback, confirmPaymentCallback } from './pay.js';
 import { signCommand } from './sign.js';
 import { servicesCommand } from './services.js';
+import { tipCommand } from './tip.js';
+import { walletCommand } from './wallet.js';
 import { helpCommand } from './help.js';
 import { reportError, replyWithSafeError } from '../lib/errors.js';
 
@@ -15,6 +17,8 @@ export function setupCommands(bot) {
   bot.command('pay', payCommand);
   bot.command('sign', signCommand);
   bot.command('services', servicesCommand);
+  bot.command('tip', tipCommand);
+  bot.command('wallet', walletCommand);
 
   bot.action(/^payment:(confirm|cancel):([a-f0-9-]{36})$/, async (ctx) => {
     const [, action, intentId] = ctx.match;
@@ -27,6 +31,7 @@ export function setupCommands(bot) {
   bot.on('text', async (ctx) => {
     const text = ctx.message.text;
     if (text.startsWith('/')) return;
+    if (/^tip(?:\s|$)/i.test(text.trim())) return tipCommand(ctx);
 
     if (!ctx.agent.enabled) {
       return ctx.reply('👋 Natural-language assistance is disabled. Use /help to see available commands.');

@@ -18,6 +18,8 @@ The following controls must not be weakened without documented review and tests:
 4. Natural-language processing must not create payment, signing, swap, service-checkout, or trading requests.
 5. Transfer and signing controls must default to disabled.
 6. User-facing errors and routine logs must not reveal raw provider errors, secrets, or Telegram message bodies.
+7. A tip reply must bind to the exact replied-to Telegram user ID; an `@username` tip must resolve only to an explicitly registered wallet profile.
+8. Wallet registration must validate the address for the selected chain and must be performed in a private chat.
 
 ## Release gates for mainnet wallet transfers
 
@@ -25,7 +27,8 @@ Before enabling `ENABLE_WALLET_TRANSFERS`, maintainers must document and complet
 
 - Verified Paybox SDK method, request schema, amount-unit semantics, and response states.
 - Controlled staging/testnet integration tests for success, approval, denial, timeout, retry, duplicate update, and restart cases.
-- Shared persistent storage for intents, idempotency keys, account links, rate limits, and audit events.
+- Shared persistent storage for intents, idempotency keys, Telegram wallet profiles, rate limits, and audit events.
+- Controlled group-tip tests for reply identity, username lookup, unregistered recipients, self-tips, username changes, and duplicate Telegram updates.
 - Durable provider-status handling through an authenticated webhook or worker queue.
 - Secret scanning, dependency scanning, centralized redacted logging, monitoring, and an emergency kill switch.
 - Independent application-security review and documented launch approval.

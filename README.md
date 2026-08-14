@@ -1,6 +1,6 @@
 # Paybox Telegram Bot
 
-A Telegram companion for **read-only portfolio checks**, **validated payment drafts**, **message-signing guidance**, and **x402 service discovery**. The bot is designed around Paybox credentials and approvals, but it deliberately keeps high-risk wallet transfers disabled until the installed SDK contract has been independently verified in a controlled environment.
+A Telegram companion for **read-only portfolio checks**, **validated payment drafts**, **group tipping drafts**, **message-signing guidance**, and **x402 service discovery**. The bot is designed around Paybox credentials and approvals, but it deliberately keeps high-risk wallet transfers disabled until the installed SDK contract has been independently verified in a controlled environment.
 
 > **Current release posture: staging-ready baseline.** The repository has safe payment parsing, recipient validation, explicit Telegram confirmation controls, AI draft-only behavior, persistent intents, reconciliation, redacted errors, liveness/readiness checks, an emergency transfer kill switch, and automated tests. It is **not approved for mainnet wallet transfers** until the provider contract, controlled staging workflow, and external security review are complete.
 
@@ -11,6 +11,9 @@ A Telegram companion for **read-only portfolio checks**, **validated payment dra
 | `/balance [wallet_address]` | Available | Read-only portfolio view through Paybox; provide an address if Paybox credential metadata does not expose one. |
 | `/pay <wallet_address> <amount> <ETH|SOL>` | Draft available | Validates address, amount, and asset; shows a user-owned confirmation card. |
 | `/transfer` | Legacy alias | Uses the same draft flow as `/pay`; no duplicate transfer implementation remains. |
+| `tip <amount> <ETH|SOL>` | Draft available | Reply to a Telegram user’s message; resolves the exact replied-to user ID to a wallet they registered. |
+| `tip @username <amount> <ETH|SOL>` | Draft available | Resolves only to a username with an explicitly registered wallet profile. |
+| `/wallet <ETH|SOL> <address>` | Available privately | Registers the caller’s validated receiving wallet; group registration is rejected. |
 | Wallet-transfer request creation | Disabled by default | Requires explicit adapter confirmation and controlled integration tests before enablement. |
 | `/sign <message>` | Temporarily disabled | No signature request is created until a persistent confirmation/status workflow is implemented. |
 | `/services [query]` | Discovery only | Shows available services; service checkout is not enabled. |
@@ -27,6 +30,7 @@ The bot treats financial actions as high-risk operations. It applies the followi
 5. **Transfers fail closed.** `ENABLE_WALLET_TRANSFERS=false` is the default. An attempt to enable transfers without `PAYBOX_TRANSFER_ADAPTER_CONFIRMED=true` prevents startup. `PAYBOX_WALLET_TRANSFERS_KILL_SWITCH=true` disables new transfer creation on the next restart even if transfer enablement was requested.
 6. **Redacted errors and logs.** Users receive a correlation reference rather than raw provider or implementation errors. Update logs omit message text and callback payloads.
 7. **Basic abuse protection.** The in-process limiter allows 20 updates per user per minute. Production deployment must replace this with a shared store.
+8. **Tip identity binding.** Reply tips bind to the replied-to Telegram user ID; `@username` tips require an explicit wallet registration. Usernames are never treated as wallet addresses.
 
 ## Architecture
 
@@ -108,7 +112,7 @@ docker compose ps
 docker compose logs -f bot
 ```
 
-The bot container waits for PostgreSQL to become healthy, passes `DATABASE_URL` internally, runs the checked-in payment-intent migration at startup, and exposes non-sensitive `GET /healthz` and `GET /readyz` endpoints on port 3000 inside the container. Verify the service with `docker compose ps` and `docker compose logs -f bot`. Keep `ENABLE_WALLET_TRANSFERS=false`, `PAYBOX_TRANSFER_ADAPTER_CONFIRMED=false`, and `PAYBOX_WALLET_TRANSFERS_KILL_SWITCH=false` for every first deployment; set the kill switch to `true` and restart immediately during an incident.
+The bot container waits for PostgreSQL to become healthy, passes `DATABASE_URL` internally, runs the checked-in payment-intent and wallet-profile migrations at startup, and exposes non-sensitive `GET /healthz` and `GET /readyz` endpoints on port 3000 inside the container. Verify the service with `docker compose ps` and `docker compose logs -f bot`. Keep `ENABLE_WALLET_TRANSFERS=false`, `PAYBOX_TRANSFER_ADAPTER_CONFIRMED=false`, and `PAYBOX_WALLET_TRANSFERS_KILL_SWITCH=false` for every first deployment; set the kill switch to `true` and restart immediately during an incident.
 
 For updates, pull the new code and rebuild the image without deleting the database volume:
 
@@ -158,6 +162,9 @@ Never commit `.env` files, deploy secrets in client code, or send secret values 
 | `/transfer <address> <amount> <ETH|SOL>` | Legacy alias of `/pay`. |
 | `/sign <message>` | Displays the current signing safety gate; no request is created. |
 | `/services [query]` | Discover services without initiating checkout. |
+| `/wallet <ETH|SOL> <address>` | Register a receiving wallet in a private chat. |
+| `tip <amount> <ETH|SOL>` | Reply to a user’s message to prepare a tip draft. |
+| `tip @username <amount> <ETH|SOL>` | Prepare a tip draft for a registered username. |
 
 ## Quality checks
 
@@ -178,7 +185,7 @@ Do **not** change the transfer flags solely to test a live transfer. Complete ea
 3. Use the durable reconciliation worker for provider request-status changes, then add provider webhooks or an outbox-backed notification worker when user notifications are required. Telegram webhook endpoints should verify Telegram’s `secret_token` header and process updates idempotently.[4]
 4. Build controlled staging/testnet integration tests for the actual Paybox API contract, including approvals, denials, retries, timeouts, and duplicate Telegram updates.
 5. Replace the in-process limiter with shared rate limiting for multi-instance deployments, configure monitored audit logs and secret scanning, exercise the implemented emergency kill switch, and verify the health/readiness probes.
-6. Complete an independent application-security review and a controlled mainnet launch checklist before allowing users to create transfer requests.
+6. Complete an independent application-security review and a controlled mainnet launch checklist before allowing users to create transfer requests. Group tips must also preserve explicit wallet registration, exact Telegram identity binding, and duplicate-update protection.
 
 ## Deployment approaches
 

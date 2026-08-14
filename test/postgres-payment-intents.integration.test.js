@@ -10,6 +10,7 @@ test('PostgreSQL payment intents persist idempotency and single-use claims', {
   const store = PostgresPaymentIntentStore.fromConnectionString({ connectionString: databaseUrl });
   await store.initialize();
   const idempotencyKey = `integration-${Date.now()}`;
+  const profileUserId = `tip-user-${Date.now()}`;
   const draft = {
     asset: 'ETH',
     chain: 'eip155:1',
@@ -19,6 +20,22 @@ test('PostgreSQL payment intents persist idempotency and single-use claims', {
   };
 
   try {
+    assert.equal(await store.checkHealth(), true);
+    await store.registerWalletProfile({
+      telegramUserId: profileUserId,
+      telegramUsername: 'integration_tip_user',
+      asset: 'SOL',
+      walletAddress: '5EYjJb9TQHYYb9H1X6kzfYy9qCj8Kx4aTqWwVdQ7BvzP',
+    });
+    assert.equal(
+      (await store.getWalletProfile({ telegramUsername: 'INTEGRATION_TIP_USER', asset: 'SOL' })).telegramUserId,
+      profileUserId,
+    );
+    assert.equal(
+      (await store.getWalletProfile({ telegramUserId: profileUserId, asset: 'SOL' })).walletAddress,
+      '5EYjJb9TQHYYb9H1X6kzfYy9qCj8Kx4aTqWwVdQ7BvzP',
+    );
+
     const created = await store.createDraft({
       telegramUserId: 'user-1',
       chatId: 'chat-1',
@@ -49,6 +66,7 @@ test('PostgreSQL payment intents persist idempotency and single-use claims', {
   } finally {
     await store.pool.query('DELETE FROM payment_intent_events WHERE intent_id IN (SELECT id FROM payment_intents WHERE idempotency_key = $1)', [idempotencyKey]);
     await store.pool.query('DELETE FROM payment_intents WHERE idempotency_key = $1', [idempotencyKey]);
+    await store.pool.query('DELETE FROM wallet_profiles WHERE telegram_user_id = $1', [profileUserId]);
     await store.close();
   }
 });
