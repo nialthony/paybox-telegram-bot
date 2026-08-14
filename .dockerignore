@@ -7,3 +7,5 @@ npm-debug.log*
 *.md
 test
 coverage
+backups
+*.sql

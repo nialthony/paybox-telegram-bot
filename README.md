@@ -59,7 +59,7 @@ flowchart TD
 ```bash
 git clone https://github.com/nialthony/paybox-telegram-bot.git
 cd paybox-telegram-bot
-npm install
+npm ci
 cp .env.example .env
 ```
 
@@ -84,6 +84,46 @@ For local development with restart-on-change:
 ```bash
 npm run dev
 ```
+
+## Self-deploy with Docker Compose
+
+The repository includes a self-contained Docker Compose deployment with a non-root bot container, PostgreSQL, a durable database volume, a database health check, and automatic schema initialization. Docker Compose is the simplest independent deployment path for a single host.
+
+Install [Docker Engine](https://docs.docker.com/engine/install/) with the [Compose v2 plugin](https://docs.docker.com/compose/install/linux/) on an Ubuntu server or another supported host. Then run:
+
+```bash
+git clone https://github.com/nialthony/paybox-telegram-bot.git
+cd paybox-telegram-bot
+cp .env.docker.example .env
+chmod 600 .env
+# Edit .env and replace every placeholder, especially the Telegram token,
+# Paybox API key, and PostgreSQL password.
+nano .env
+docker compose --env-file .env config --quiet
+docker compose up -d --build
+docker compose ps
+docker compose logs -f bot
+```
+
+The bot container waits for PostgreSQL to become healthy, passes `DATABASE_URL` internally, and runs the checked-in payment-intent migration at startup. A successful startup should show the bot process without a configuration error. Keep `ENABLE_WALLET_TRANSFERS=false` and `PAYBOX_TRANSFER_ADAPTER_CONFIRMED=false` for every first deployment.
+
+For updates, pull the new code and rebuild the image without deleting the database volume:
+
+```bash
+git pull --ff-only
+docker compose up -d --build
+```
+
+Create a database backup before upgrades or host maintenance. This command writes the dump to the host and does not print the database password:
+
+```bash
+mkdir -p backups
+docker compose exec -T postgres sh -lc 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > "backups/paybox-$(date -u +%Y%m%dT%H%M%SZ).sql"
+```
+
+To stop the services while preserving data, use `docker compose down`. Do **not** use `docker compose down -v` unless you intentionally want to delete the PostgreSQL volume and all stored payment intents and audit events. Review logs with `docker compose logs --since=1h bot postgres`, and verify that the host protects `.env` and the `backups/` directory.
+
+The Docker deployment is suitable for read-only and draft-only staging. It is not an approval to enable live wallet transfers. Before enabling money movement, complete the provider-contract, staging, reconciliation, rate-limit, kill-switch, dependency, monitoring, and independent security-review gates in `DEPLOYMENT.md`.
 
 ## Environment configuration
 
@@ -118,11 +158,10 @@ Never commit `.env` files, deploy secrets in client code, or send secret values 
 The repository uses Node’s built-in test runner so core safety controls can be tested without calling Telegram, Paybox, or an LLM.
 
 ```bash
-npm test
-find src test -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+npm run check
 ```
 
-The suite covers exact ETH/SOL conversions, unsupported input rejection, ownership and expiry of payment drafts, AI intent restrictions, configuration guards, rate limiting, the transfer-adapter gate, provider-status mapping, and reconciliation failure isolation. The PostgreSQL integration test is skipped unless `TEST_DATABASE_URL` is provided. GitHub Actions runs the dependency-free checks for pushes and pull requests to `main`.
+The suite covers exact ETH/SOL conversions, unsupported input rejection, ownership and expiry of payment drafts, AI intent restrictions, configuration guards, rate limiting, the transfer-adapter gate, provider-status mapping, and reconciliation failure isolation. The PostgreSQL integration test is skipped unless `TEST_DATABASE_URL` is provided. Run `npm run db:migrate` with `DATABASE_URL` to initialize the schema explicitly. GitHub Actions runs the dependency-free checks for pushes and pull requests to `main`.
 
 ## Before enabling mainnet wallet transfers
 
