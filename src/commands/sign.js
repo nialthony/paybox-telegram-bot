@@ -1,104 +1,128 @@
-export async function signCommand(ctx) {
-  const message = ctx.message.text.split(' ').slice(1).join(' ');
+import { UsageError } from '../middleware/index.js';
+import { requireWallet } from './shared.js';
+import { requestArtifact } from '../paybox/client.js';
+import { completeWalletSign } from '../paybox/signing.js';
+import { sanitizeText } from '../utils/validate.js';
+import { logger } from '../logger.js';
+import { approvalUrl } from './transfer.js';
 
-  if (!message) {
-    await ctx.reply(
-      '❌ Usage: /sign <message>\n\n' +
-      'Example: /sign hello world\n' +
-      'Example: /sign gm frens',
-      { parse_mode: 'Markdown' }
+const SLEEP = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * /sign <message>            — EIP-191 message signature (EVM wallet)
+ * /sign <eip712-json>        — EIP-712 typed-data signature (EVM wallet)
+ * /sign sol:<message>        — Solana message signature (Solana wallet)
+ *
+ * The private key never leaves MoonX MPC; the artifact is assembled here and
+ * returned to the chat.
+ */
+export async function signCommand(ctx, args) {
+  if (args.length === 0) {
+    throw new UsageError(
+      '❌ **Usage**\n\n' +
+        '• `/sign gm frens` — EIP-191 message signature\n' +
+        '• `/sign sol:gm frens` — Solana message signature\n' +
+        '• `/sign {"domain":…,"types":…,"primaryType":…,"message":…}` — EIP-712 typed data'
     );
-    return;
   }
 
+  const raw = args.join(' ');
+  let intent;
+  let family = 'evm';
+  let display = raw;
+
+  if (raw.startsWith('sol:')) {
+    family = 'solana';
+    display = raw.slice(4);
+    intent = { op: 'solanaMessage', message: display };
+  } else if (raw.trim().startsWith('{')) {
+    let typedData;
+    try {
+      typedData = JSON.parse(raw);
+    } catch {
+      throw new UsageError('❌ That looks like JSON but it does not parse. Check your quotes/braces.');
+    }
+    if (!typedData.types || !typedData.primaryType || !typedData.message) {
+      throw new UsageError('❌ EIP-712 data needs `domain`, `types`, `primaryType` and `message`.');
+    }
+    family = 'evm';
+    intent = { op: 'typedData', typedData };
+    display = 'EIP-712 typed data';
+  } else {
+    intent = { op: 'message', message: sanitizeText(raw, 2048) };
+    display = sanitizeText(raw, 200);
+  }
+
+  const wallet = await requireWallet(ctx, { family });
+
+  if (!ctx.canSign) {
+    throw new UsageError(
+      '❌ **Signing key required** — signing needs the `pbxk1.` key. Set `PAYBOX_SIGNING_KEY` and restart the bot.'
+    );
+  }
+
+  const statusMsg = await ctx.reply(
+    `✍️ **Preparing signature**\n\nMessage: _${display.length > 80 ? display.slice(0, 80) + '…' : display}_\n\n_Requesting signature from ${family === 'evm' ? 'EVM' : 'Solana'} wallet…_`,
+    { parse_mode: 'Markdown' }
+  );
+  const edit = (text, extra) =>
+    ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, text, extra).catch(() => {});
+
   try {
-    await ctx.reply(`⏳ Preparing message to sign...\n\nMessage: "${message}"`);
+    let request = await ctx.paybox.requestWalletSign({ credentialId: wallet.id, intent });
 
-    const { credentials } = await ctx.paybox.listCredentials();
-
-    if (credentials.length === 0) {
-      await ctx.reply('❌ No wallet credentials found.');
-      return;
-    }
-
-    // Find wallet credential
-    const walletCredential = credentials.find((c) => c.kind === 'wallet');
-    if (!walletCredential) {
-      await ctx.reply('❌ No wallet found. Please connect a wallet at https://app.paybox.sh');
-      return;
-    }
-
-    // Request wallet sign
-    const signRequest = await ctx.paybox.requestWalletSign({
-      credentialId: walletCredential.credential_id,
-      intent: {
-        op: 'message',
-        message: message,
-      },
-    });
-
-    if (signRequest.status === 'pending_approval') {
-      await ctx.reply(
-        `✅ Please approve signing this message:\n\n` +
-        `\`${message}\`\n\n` +
-        `[Approve Signing](${signRequest.approval_url})`,
+    if (request.status === 'pending_approval') {
+      await edit(
+        `🔐 **Approve signing**\n\nMessage: _${display.length > 80 ? display.slice(0, 80) + '…' : display}_\n\nApprove with your passkey in Paybox.`,
         {
           parse_mode: 'Markdown',
           reply_markup: {
-            inline_keyboard: [
-              [{ text: '✅ Sign', url: signRequest.approval_url }],
-              [{ text: '❌ Deny', callback_data: `deny_${signRequest.request_id}` }],
-            ],
+            inline_keyboard: [[{ text: '✅ Approve in Paybox', url: approvalUrl(request) }]],
           },
         }
       );
+      request = await waitApprovalAndSign(ctx, request.request_id, intent);
+    }
 
-      // Poll for completion
-      pollSignStatus(ctx, signRequest.request_id);
-    } else if (signRequest.status === 'pending_signature') {
-      await ctx.reply('⏳ Signing in progress...');
-      pollSignStatus(ctx, signRequest.request_id);
-    } else if (signRequest.status === 'success') {
-      const signature = signRequest.output.signature;
-      await ctx.reply(
-        `✅ **Message Signed!**\n\n` +
-        `Signature:\n\`${signature}\``,
+    if (request.status !== 'success') {
+      await edit(
+        `❌ **Signing ${request.status === 'denied' ? 'denied' : 'failed'}** — ${request.reason || request.error || ''}`,
         { parse_mode: 'Markdown' }
       );
-    } else {
-      await ctx.reply(`❌ Signing failed: ${signRequest.status}`);
+      return;
     }
+
+    const artifact = requestArtifact(request);
+    const signature = artifact?.signature || artifact?.serializedTransaction || artifact?.signedTransactionBase64;
+    if (!signature) {
+      await edit('❌ Signing succeeded but no artifact came back — check /history.', { parse_mode: 'Markdown' });
+      return;
+    }
+
+    const label = intent.op === 'typedData' ? 'EIP-712 signature' : intent.op === 'solanaMessage' ? 'Solana signature' : 'EIP-191 signature';
+    const compact = String(signature).length > 60 ? `${String(signature).slice(0, 60)}…` : signature;
+
+    await edit(
+      `✅ **Message signed**\n\n${label}:\n\`${compact}\`\n\n_From wallet \`${wallet.metadata?.address?.slice(0, 10)}…\` — verify independently before trusting._`,
+      { parse_mode: 'Markdown' }
+    );
+    ctx.stats?.hit('sign_completed');
   } catch (error) {
-    console.error('Sign error:', error);
-    await ctx.reply(`❌ Error: ${error.message}`);
+    logger.error('sign error:', error.message);
+    await edit(`❌ **Signing failed** — ${error.message}`, { parse_mode: 'Markdown' });
   }
 }
 
-async function pollSignStatus(ctx, requestId, attempts = 0) {
-  if (attempts > 30) {
-    await ctx.reply('⏱️ Signing polling timeout. Please check manually.');
-    return;
-  }
-
-  try {
+async function waitApprovalAndSign(ctx, requestId, intent) {
+  const deadline = Date.now() + ctx.config.requestTimeoutMs;
+  for (;;) {
+    await SLEEP(ctx.config.pollIntervalMs);
     const request = await ctx.paybox.getRequest(requestId);
-
-    if (request.status === 'success') {
-      const signature = request.output.signature;
-      await ctx.reply(
-        `✅ **Signature Confirmed!**\n\n` +
-        `\`${signature}\``,
-        { parse_mode: 'Markdown' }
-      );
-    } else if (request.status === 'denied') {
-      await ctx.reply('❌ Signing was denied.');
-    } else if (request.status === 'error') {
-      await ctx.reply(`❌ Signing error: ${request.error_message}`);
-    } else {
-      // Still pending, poll again after 5 seconds
-      setTimeout(() => pollSignStatus(ctx, requestId, attempts + 1), 5000);
+    if (request.status === 'pending_signature') {
+      await completeWalletSign(ctx.paybox, requestId, intent, ctx.config.payboxSigningKey);
+      return ctx.paybox.getRequest(requestId);
     }
-  } catch (error) {
-    console.error('Poll error:', error);
+    if (!['pending_approval', 'pending_signature'].includes(request.status)) return request;
+    if (Date.now() > deadline) return { status: 'pending_approval', reason: 'Timed out waiting for approval.' };
   }
 }

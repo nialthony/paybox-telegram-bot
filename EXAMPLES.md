@@ -1,179 +1,198 @@
-# 📱 Usage Examples & Bot Interactions
+# 📖 Example conversations
 
-This document showcases how users interact with the **Paybox Telegram Bot**, including the new **AI Agent Mode** (Natural Language).
+Simulated sessions showing the bot's flows. `[paybox]` marks where the Paybox API/approval flow sits — the bot narrates its real states.
+
+## 1. First run
+
+```
+User:   /start
+Bot:    🎉 Welcome to Paybox Bot
+        Your non-custodial wallet for AI agents — right inside Telegram…
+        Status: 🟢 Connected to Paybox
+        ✍️ Signing key: in-process signing enabled
+        🧠 AI mode: on — just chat with me
+
+        [💰 Balance] [🔁 Swap] [📈 Markets]
+        [🛍 Services] [📚 Help]
+        [🔗 Paybox App] [📖 Docs]
+```
+
+## 2. Portfolio
+
+```
+User:   /balance
+Bot:    ⏳ Fetching portfolios…
+        👛 Trading wallet `0x70a0…2b1f`
+        Total: $12,480.31
+        • ETH: 4.2 ≈ $11,180.40 (+0.52%)
+        • USDC: 1,300 ≈ $1,300.00 (0.00%)
+        — On-chain data via MoonX…
+```
+
+## 3. Transfer with passkey approval
+
+```
+User:   /transfer @alice 0.05 ETH
+Bot:    ⏳ Preparing transfer
+        To: `0x8f2a…41cd`
+        Amount: 0.05 ETH (Ethereum)
+        Building the transaction…
+
+Bot:    🔐 Approval required
+        Approve with your passkey in the Paybox app, then I'll sign and
+        broadcast automatically.
+        [✅ Approve in Paybox]
+
+        …user approves on their phone…
+
+Bot:    📡 Signed. Broadcasting to Ethereum…
+
+Bot:    ✅ Transfer broadcast
+        Amount: 0.05 ETH
+        To: `0x8f2a…41cd`
+        Tx: [0x5e1f…b3a7](https://etherscan.io/tx/0x5e1f…b3a7)
+```
+
+`@alice` resolved from the address book (`/register 0x8f2a… @alice` was run earlier). If she's not registered, the bot asks for her address instead of guessing.
+
+## 4. Swap (same chain)
+
+```
+User:   /swap ETH USDC 0.5
+Bot:    🔁 Requesting swap
+        0.5 ETH → USDC
+        Getting a quote from MoonX…
+
+Bot:    ✅ Swap complete
+        0.5 ETH → USDC
+        Source tx: [0x91ab…c2de](https://etherscan.io/tx/0x91ab…c2de)
+```
+
+## 5. Bridge (cross-chain)
+
+```
+User:   /swap USDC_BASE SOL 25
+Bot:    ⏳ Swap pending_settlement… I'll keep an eye on it. Check /history in a minute.
+Bot:    ✅ Swap settled
+        Source tx: [0x2f1e…9a01](https://basescan.org/tx/0x2f1e…9a01)
+        Destination tx: [4kq2…Zt9v](https://solscan.io/tx/4kq2…Zt9v)
+```
+
+## 6. Card payment (one-time virtual card)
+
+```
+User:   /pay Acme https://acme.com 19.99
+Bot:    💳 Preparing payment — Merchant: Acme, Amount: $19.99
+Bot:    🔐 Approve payment  [✅ Approve in Paybox]
+Bot:    ✅ Virtual card issued
+        Merchant: Acme — Amount available: $19.99
+        Card: `•••• 4242`
+        Use these details at Acme's checkout. The card is one-time and
+        merchant-locked. I won't mark the purchase complete until the
+        merchant confirms it.
+```
+
+## 7. Funding a wallet (MoonPay)
+
+```
+User:   /buy 50
+Bot:    🛒 Generating a signed MoonPay checkout link…
+Bot:    💳 Fund your wallet
+        Wallet: `0x70a0…2b1f` — Network: eip155:8453 — Currency: usdc_base
+        [💳 Buy on MoonPay]
+```
+
+No money moves until the buyer completes the purchase on MoonPay's page.
+
+## 8. Signing
+
+```
+User:   /sign gm frens
+Bot:    ✅ Message signed
+        EIP-191 signature:
+        `0x9c2e…f31a`
+        From wallet `0x70a0…` — verify independently before trusting.
+
+User:   /sign sol:gm frens
+Bot:    ✅ Message signed — Solana signature: `4k2x…Z9p1`
+```
+
+## 9. Secrets
+
+```
+User:   /secret
+Bot:    🔑 Available secrets
+        🔑 OpenAI key — `9f8e…`
+        Use /secret <name> to reveal one…
+
+User:   /secret OpenAI key deploy script
+Bot:    🔐 Approve secret access — Purpose: deploy script  [✅ Approve in Paybox]
+Bot:    ✅ Secret revealed
+        `sk-…`
+        ⚠️ One-time use — treat it as consumed.
+```
+
+## 10. x402 services
+
+```
+User:   /services weather
+Bot:    🔍 Searching x402 services for "weather"…
+        🛍 Paid services (x402)
+        1. World Weather API — 0.002 X402 USDC
+        2. Satellite imagery — 0.01 X402 USDC
+        [1] [2]
+
+User:   (taps 1)
+Bot:    🛍 Paying for https://weather.example/tokyo…
+Bot:    ✅ Paid response received
+        HTTP 200 · application/json
+        {"tokyo": {"temp_c": 14, "condition": "clear"}}
+```
+
+## 11. Markets
+
+```
+User:   /markets
+Bot:    📈 Prediction markets
+        1. Fed decision — Sep 2026 — 0.540
+        2. ETH above $3000 on Dec 31 — 0.410
+        [1] [2]
+
+User:   /price fed-decision-sept
+Bot:    ▁▂▃▅▆▇▆▅▄▃▄▅▆▇▇▆▅▄▃▂▁▂▃
+        last: 0.5420 | high: 0.6100 | low: 0.4310
+        7d change: +3.42% 📈
+```
+
+## 12. AI mode
+
+```
+User:   how much ETH do I have?
+Bot:    🧠 Checking your portfolio…
+        👛 Trading wallet `0x70a0…2b1f` — Total: $12,480.31 …
+
+User:   send 10 usdc to @alice on base
+Bot:    🧠 On it — sending 10 USDC on Base to @alice.
+        ⏳ Preparing transfer… (base chain flow, same as example 3)
+```
+
+## 13. Locked / degraded modes
+
+Without `PAYBOX_SIGNING_KEY`:
+
+```
+User:   /transfer @alice 0.1 ETH
+Bot:    ❌ Signing key required
+        Transfers need the `pbxk1.` signing key so the bot can sign
+        in-process. Add PAYBOX_SIGNING_KEY and restart the bot.
+```
+
+With `OWNER_TELEGRAM_ID` set, anyone else gets:
+
+```
+Bot:    🔒 Sorry, this is a private bot. It is locked to a single owner.
+```
 
 ---
 
-### 🤖 AI Agent Mode (Natural Language)
-Instead of using `/commands`, you can just chat with the bot like a human.
-
-**User:** "Hey, check my total balance across all wallets"
-
-**Bot:**
-> 🧠 Thinking...
-> 
-> I'll check your total portfolio value for you.
-> 
-> 🔄 Executing: `/balance`
->
-> 💰 **Your Portfolio**
-> **Total Value:** $1,245.50 USD
-> ...
-
-**User:** "Send 50 USDC to @friend on Solana"
-
-**Bot:**
-> 🧠 Thinking...
-> 
-> Sure, I'll prepare a payment of 50 USDC to @friend.
-> 
-> 🔄 Executing: `/pay @friend 50 USDC`
->
-> 🔍 Resolving user @friend...
-> ⏳ **Initiating Payment**
-> ...
-
-**User:** "I need to book a cheap flight to Bali"
-
-**Bot:**
-> 🧠 Thinking...
-> 
-> I can help you with that! Searching for flight booking services.
-> 
-> 🔄 Executing: `/services flights`
->
-> ✈️ **Available Services**
-> **Brij Flights** - ~$150.00
-> ...
-
----
-
----
-
-### 1. Checking Portfolio Balance
-**User:** `/balance`
-
-**Bot:**
-> ⏳ Fetching your portfolio...
->
-> 💰 **Your Portfolio**
-> 
-> **Total Value:** $1,245.50 USD
->
-> **Wallets:**
-> • Personal Wallet (0x742...bEb)
->   Balance: $850.20
-> • Trading Wallet (5EUa...SViS)
->   Balance: $395.30
->
-> **Top Holdings:**
-> • ETH: 0.25 ($650.00) (+2.4%)
-> • SOL: 5.0 ($750.00) (-1.2%)
-> • USDC: 100.0 ($100.00)
->
-> _Last updated: 10:45:30 AM_
-
----
-
-### 2. Sending Payment to a User
-**User:** `/pay @cryptoking 0.5 ETH`
-
-**Bot:**
-> 🔍 Resolving user @cryptoking...
-> ⏳ **Initiating Payment**
->
-> **To**: `0x742d35Cc6634C0532925a3b844Bc9e7595f2bEb`
-> **Amount**: 0.5 ETH
->
-> _Checking network status..._
->
-> 🔐 **Approval Required**
->
-> Please approve this payment using your Paybox passkey.
->
-> [👉 Approve Now](https://app.paybox.sh/approve/req_123)
-> 
-> *[Button: ✅ Open Paybox]*
-
-*(After User approves via Passkey)*
-
-**Bot:**
-> ✅ **Payment Confirmed!**
->
-> Transaction Hash: `0xabc123...def456`
-
----
-
-### 3. Setup Validation (User not connected)
-**User:** `/pay @friend 10 SOL`
-
-**Bot:**
-> ⚠️ **Paybox Setup Required**
->
-> You haven't connected your Paybox account yet. To send payments, please:
-> 1. Go to [app.paybox.sh](https://app.paybox.sh)
-> 2. Connect your wallet
-> 3. Grant permissions to this bot
-
----
-
-### 4. Discovering Services (x402)
-**User:** `/services flights`
-
-**Bot:**
-> 🔍 Searching for services...
->
-> ✈️ **Available Services**
->
-> **Brij Flights** - ~$150.00
-> Book international and domestic flights directly using your Paybox wallet...
->
-> _Use /use_service <service_name> to use a service_
->
-> *[Buttons: ✈️ Flights | 🛒 Amazon | 📧 Email | 📊 Data]*
-
----
-
-### 5. Signing a Message
-**User:** `/sign gm paybox fam`
-
-**Bot:**
-> ⏳ Preparing message to sign...
-> Message: "gm paybox fam"
->
-> ✅ Please approve signing this message:
-> `gm paybox fam`
->
-> [Approve Signing](https://app.paybox.sh/approve/sign_456)
->
-> *[Buttons: ✅ Sign | ❌ Deny]*
-
-*(After User approves)*
-
-**Bot:**
-> ✅ **Signature Confirmed!**
->
-> `0x789...signature_hash...`
-
----
-
-### 6. Help Command
-**User:** `/help`
-
-**Bot:**
-> **📚 Available Commands**
->
-> **Wallet & Portfolio:**
-> • /balance - Check your crypto portfolio across all chains
-> • /pay - Send crypto to a user or address
-> • /transfer - Send crypto to another wallet (legacy)
-> • /sign - Sign a message with your wallet
->
-> **Services & Payments:**
-> • /services - Browse and use x402 services (flights, Amazon, APIs, etc.)
-> • /email - Access your Paybox email inbox
-> • /markets - Browse prediction markets
->
-> **Examples:**
-> `/pay @user 1.5 ETH` - Send 1.5 ETH to a user
-> `/pay 0x123... 10 SOL` - Send 10 SOL to address
+All flows use the same primitives the Paybox docs prescribe: never re-call a write tool to finish it — poll `get_request`; `success` means confirmed on-chain; `denied` shows the reason and is never retried blindly.

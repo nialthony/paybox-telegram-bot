@@ -16,7 +16,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Runtime data
+# Runtime data (address book, stats)
+data/
+
+# Runtime
 pids
 *.pid
 *.seed

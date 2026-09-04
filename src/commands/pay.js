@@ -1,127 +1,134 @@
-export async function payCommand(ctx) {
-  const args = ctx.message.text.split(' ').slice(1);
+import { UsageError } from '../middleware/index.js';
+import { requireCard } from './shared.js';
+import { requestArtifact } from '../paybox/client.js';
+import { parseUsd, isUrl, sanitizeText } from '../utils/validate.js';
+import { formatCents } from '../utils/format.js';
+import { logger } from '../logger.js';
 
-  if (args.length < 2) {
-    await ctx.reply(
-      '❌ **Usage**: `/pay <@user|address> <amount> [token]`\n\n' +
-      '**Examples**:\n' +
-      '• `/pay @cryptoking 1.5 ETH`\n' +
-      '• `/pay 0x123... 10 SOL`',
-      { parse_mode: 'Markdown' }
+const SLEEP = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * /pay <merchant> <url> <usd>
+ *
+ * Authorizes a merchant-scoped, one-time virtual card for a card credential.
+ * This does NOT complete the merchant checkout — it issues the card details
+ * the user then enters at the merchant's site. For passkey-approved payments
+ * the card is claimed once via `claim_payment_credentials`.
+ */
+export async function payCommand(ctx, args) {
+  if (args.length < 3) {
+    throw new UsageError(
+      '❌ **Usage**\n\n' +
+        '`/pay <merchant> <url> <usd>`\n\n' +
+        '**Example**\n' +
+        '• `/pay Acme https://acme.com 19.99`\n\n' +
+        'This issues a one-time virtual card bound to the merchant origin. ' +
+        'You then complete the checkout yourself — the bot never submits the purchase.'
     );
-    return;
   }
 
-  const [recipientInput, amount, tokenInput = 'ETH'] = args;
-  const token = tokenInput.toUpperCase();
+  const [merchantRaw, url, usdRaw] = args;
+  const merchant = sanitizeText(merchantRaw, 80);
+  const amountCents = parseUsd(usdRaw);
+
+  if (!isUrl(url)) {
+    throw new UsageError('❌ `<url>` must be an https:// URL — the real merchant origin the card is bound to.');
+  }
+  if (amountCents === null) {
+    throw new UsageError(`❌ Invalid USD amount: "${usdRaw}".`);
+  }
+
+  const card = await requireCard(ctx);
+
+  const statusMsg = await ctx.reply(
+    `💳 **Preparing payment**\n\nMerchant: ${merchant}\nAmount: ${formatCents(amountCents)}\n\n_Authorizing card issuance…_`,
+    { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } }
+  );
+  const edit = (text, extra) =>
+    ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, text, extra).catch(() => {});
 
   try {
-    // 1. Check if Sender has Paybox setup
-    const { credentials } = await ctx.paybox.listCredentials();
-    
-    if (!credentials || credentials.length === 0) {
-      await ctx.reply(
-        '⚠️ **Paybox Setup Required**\n\n' +
-        'You haven\'t connected your Paybox account yet. To send payments, please:\n' +
-        '1. Go to [app.paybox.sh](https://app.paybox.sh)\n' +
-        '2. Connect your wallet\n' +
-        '3. Grant permissions to this bot',
-        { parse_mode: 'Markdown' }
-      );
-      return;
-    }
-
-    // Find appropriate wallet credential
-    const walletCredential = credentials.find((c) => c.kind === 'wallet');
-    if (!walletCredential) {
-      await ctx.reply('❌ **No Wallet Found**: Please grant this bot access to a wallet in your Paybox settings.');
-      return;
-    }
-
-    // 2. Resolve Recipient
-    let recipientAddress = recipientInput;
-    
-    if (recipientInput.startsWith('@')) {
-      // In a real app, you would look this up in a database
-      // For this demo, we'll simulate a check
-      await ctx.reply(`🔍 Resolving user ${recipientInput}...`);
-      
-      // Simulation: Only @paybox_dev is "registered" for the demo
-      if (recipientInput.toLowerCase() === '@paybox_dev') {
-        recipientAddress = '0x742d35Cc6634C0532925a3b844Bc9e7595f2bEb'; // Demo address
-      } else {
-        await ctx.reply(
-          `❌ **User Not Found**: ${recipientInput} has not registered their wallet with this bot yet.\n\n` +
-          `Ask them to run \`/start\` and connect their Paybox account!`
-        );
-        return;
-      }
-    }
-
-    await ctx.reply(
-      `⏳ **Initiating Payment**\n\n` +
-      `**To**: \`${recipientAddress}\`\n` +
-      `**Amount**: ${amount} ${token}\n\n` +
-      `_Checking network status..._`,
-      { parse_mode: 'Markdown' }
-    );
-
-    // 3. Determine chain
-    let chain;
-    if (token === 'SOL') {
-      chain = 'solana:5eykt4UsFv2P6tnw2qTr3tWUomtW5oGS5zgziYyQd53';
-    } else if (token === 'ETH') {
-      chain = 'eip155:1';
-    } else {
-      await ctx.reply('❌ **Unsupported Token**: Currently supports ETH and SOL.');
-      return;
-    }
-
-    // 4. Request transfer via Paybox
-    const transfer = await ctx.paybox.requestTransfer({
-      credentialId: walletCredential.credential_id,
-      chain,
-      to: recipientAddress,
-      amount: (parseFloat(amount) * 1e18).toString(), // Simplified conversion
+    let request = await ctx.paybox.requestPayment({
+      credentialId: card.id,
+      merchant,
+      merchantUrl: url,
+      amountCents,
+      currency: 'USD',
     });
 
-    if (transfer.status === 'pending_approval') {
-      await ctx.reply(
-        `🔐 **Approval Required**\n\n` +
-        `Please approve this payment using your Paybox passkey.\n\n` +
-        `[👉 Approve Now](${transfer.approval_url})`,
+    if (request.status === 'pending_approval') {
+      const approval = approvalUrl(request);
+      await edit(
+        `🔐 **Approve payment**\n\nMerchant: ${merchant}\nAmount: ${formatCents(amountCents)}\n\nApprove with your passkey in Paybox, then I’ll fetch the card details.`,
         {
           parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [[{ text: '✅ Open Paybox', url: transfer.approval_url }]],
-          },
+          reply_markup: { inline_keyboard: [[{ text: '✅ Approve in Paybox', url: approval }]] },
         }
       );
-      
-      pollStatus(ctx, transfer.request_id);
-    } else if (transfer.status === 'success') {
-      await ctx.reply(`✅ **Payment Sent!**\n\nHash: \`${transfer.output.transaction_hash}\``, { parse_mode: 'Markdown' });
-    } else {
-      await ctx.reply(`❌ **Payment Failed**: ${transfer.status}`);
+
+      request = await waitForApproval(ctx, request.request_id);
     }
 
+    if (request.status === 'denied') {
+      await edit(`❌ **Payment denied** — ${request.reason || 'rejected in Paybox.'}`, { parse_mode: 'Markdown' });
+      return;
+    }
+    if (request.status !== 'success') {
+      await edit(`❌ **Payment failed** — ${request.error || request.error_message || request.status}`, { parse_mode: 'Markdown' });
+      return;
+    }
+
+    // The polled request redacts the card for human-approved payments; claim it.
+    let cardDetails = requestArtifact(request);
+    try {
+      const claimed = await ctx.paybox.claimPaymentCredentials(request.request_id);
+      cardDetails = claimed?.value ?? claimed ?? cardDetails;
+    } catch {
+      /* already claimed or not required — use what we have */
+    }
+
+    await edit(
+      `✅ **Virtual card issued**\n\n` +
+        `Merchant: ${merchant}\n` +
+        `Amount available: ${formatCents(amountCents)}\n` +
+        `Expires: ${cardDetails?.expires_at ? new Date(cardDetails.expires_at).toLocaleString() : 'one-time use'}\n\n` +
+        `Card: \`${maskCard(cardDetails)}\`\n\n` +
+        `_Use these details at ${merchant}'s checkout. The card is one-time and merchant-locked. I won't mark the purchase complete until the merchant confirms it._`,
+      {
+        parse_mode: 'Markdown',
+        link_preview_options: { is_disabled: true },
+      }
+    );
+    ctx.stats?.hit('payment_issued');
   } catch (error) {
-    console.error('Pay error:', error);
-    await ctx.reply(`❌ **Error**: ${error.message}`);
+    logger.error('pay error:', error.message);
+    await edit(`❌ **Payment failed** — ${error.message}`, { parse_mode: 'Markdown' });
   }
 }
 
-async function pollStatus(ctx, requestId, attempts = 0) {
-  if (attempts > 20) return;
+function maskCard(details) {
+  if (!details) return '•••• •••• •••• ••••';
+  const number = details.number || details.card_number || details.pan;
+  if (number) {
+    return `•••• ${String(number).slice(-4)}`;
+  }
+  const brand = details.brand ? `${details.brand} ` : '';
+  const last4 = details.last4 || details.last_four || '';
+  return `${brand}•••• ${last4}`.trim();
+}
 
-  try {
+function approvalUrl(request) {
+  return request?.approval_url || request?.output?.approval_url || request?.approval?.url || 'https://app.paybox.sh';
+}
+
+async function waitForApproval(ctx, requestId) {
+  const deadline = Date.now() + ctx.config.requestTimeoutMs;
+  for (;;) {
+    await SLEEP(ctx.config.pollIntervalMs);
     const request = await ctx.paybox.getRequest(requestId);
-    if (request.status === 'success') {
-      await ctx.reply(`✅ **Payment Confirmed!**\n\nTransaction Hash: \`${request.output.transaction_hash}\``, { parse_mode: 'Markdown' });
-    } else if (['denied', 'error'].includes(request.status)) {
-      await ctx.reply(`❌ **Payment ${request.status === 'denied' ? 'Rejected' : 'Failed'}**`);
-    } else {
-      setTimeout(() => pollStatus(ctx, requestId, attempts + 1), 5000);
+    if (!['pending_approval', 'pending_signature'].includes(request.status)) return request;
+    if (Date.now() > deadline) {
+      return { status: 'pending_approval', reason: 'Timed out waiting for approval.' };
     }
-  } catch (e) {}
+  }
 }

@@ -1,45 +1,118 @@
-import { Telegraf } from 'telegraf';
-import { PayboxClient } from '@paybox-sh/sdk';
-import dotenv from 'dotenv';
-import { setupCommands } from './commands/index.js';
-import { setupMiddleware } from './middleware/index.js';
-import { PayboxAgent } from './agent/index.js';
+import config, { ensureDataDir, validateConfig } from './config.js';
+import { logger } from './logger.js';
+import { createBot, COMMAND_LIST } from './bot.js';
+import { getClient } from './paybox/client.js';
+import { stopAllPollers, pollerCount } from './utils/poll.js';
+import { SessionStore } from './store/sessions.js';
+import { Registry } from './store/registry.js';
+import { Stats } from './store/stats.js';
 
-dotenv.config();
+/**
+ * Paybox Telegram Bot — entrypoint.
+ *
+ * Launch modes:
+ *  - Long polling (default, zero config)
+ *  - Webhook (BOT_WEBHOOK_URL + BOT_PORT set); Telegraf serves the hook and a
+ *    /healthz endpoint via the webhook `cb`.
+ */
 
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
+function healthzHandler(req, res) {
+  if (req.url !== '/healthz') {
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(
+    JSON.stringify({
+      ok: true,
+      paybox: Boolean(getClient(config)),
+      signing: config.canSign,
+      agent: config.hasAgent,
+      pollers: pollerCount(),
+      uptime: process.uptime(),
+    })
+  );
+}
 
-// Initialize AI Agent
-const agent = new PayboxAgent(process.env.OPENAI_API_KEY);
-bot.context.agent = agent;
+async function main() {
+  const problems = validateConfig(config);
+  for (const problem of problems) {
+    logger.warn(`config: ${problem}`);
+  }
+  if (!config.telegramBotToken) {
+    logger.error('FATAL: TELEGRAM_BOT_TOKEN is missing. Add it to .env and restart.');
+    process.exit(1);
+  }
 
-// Initialize Paybox client
-const paybox = PayboxClient.fromConfig({
-  apiKey: process.env.PAYBOX_API_KEY,
-  signingKey: process.env.PAYBOX_SIGNING_KEY,
+  ensureDataDir(config);
+
+  // Runtime stores
+  const sessions = new SessionStore();
+  const registry = new Registry({ dir: config.dataDir });
+  const stats = new Stats({ dir: config.dataDir });
+
+  // Paybox client (null until configured — the bot degrades to setup mode)
+  const paybox = getClient(config);
+
+  const bot = createBot({ config, paybox, sessions, registry, stats });
+  bot.catch((error, ctx) => {
+    logger.error('telegraf catch:', error);
+    ctx.reply('❌ An unexpected error occurred. Please try again later.').catch(() => {});
+  });
+
+  // Publish the command menu so / suggestions work in the Telegram client.
+  bot.telegram
+    .setMyCommands(COMMAND_LIST)
+    .then(() => logger.info(`registered ${COMMAND_LIST.length} commands with Telegram`))
+    .catch((error) => logger.warn(`setMyCommands failed: ${error.message}`));
+
+  if (config.botWebhookUrl) {
+    const domain = new URL(config.botWebhookUrl).host;
+    await bot.launch({
+      dropPendingUpdates: true,
+      webhook: {
+        domain,
+        path: config.botWebhookPath,
+        port: config.botPort,
+        host: '0.0.0.0',
+        cb: healthzHandler,
+      },
+    });
+    logger.info(
+      `webhook serving on :${config.botPort} (${config.botWebhookPath} + /healthz) → ${config.botWebhookUrl}${config.botWebhookPath}`
+    );
+  } else {
+    logger.info('using long polling (set BOT_WEBHOOK_URL to switch to webhook mode)');
+    await bot.launch({ dropPendingUpdates: true });
+  }
+
+  logger.info(
+    `🤖 Paybox Telegram Bot online — paybox=${Boolean(paybox)} signing=${config.canSign} agent=${config.hasAgent} mode=${config.botWebhookUrl ? 'webhook' : 'polling'}`
+  );
+
+  // Graceful shutdown
+  let shuttingDown = false;
+  const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(`${signal} received — shutting down…`);
+    stopAllPollers();
+    sessions.stop();
+    await bot.stop(signal).catch(() => {});
+    process.exit(0);
+  };
+
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('unhandledRejection', (reason) => logger.error('unhandledRejection:', reason));
+  process.on('uncaughtException', (error) => {
+    logger.error('uncaughtException:', error);
+    shutdown('uncaughtException');
+  });
+}
+
+main().catch((error) => {
+  logger.error('fatal startup error:', error);
+  process.exit(1);
 });
-
-// Attach paybox to bot context
-bot.context.paybox = paybox;
-
-// Setup middleware
-setupMiddleware(bot);
-
-// Setup commands
-setupCommands(bot);
-
-// Error handling
-bot.catch((err, ctx) => {
-  console.error('Bot error:', err);
-  ctx.reply('❌ An error occurred. Please try again later.').catch(() => {});
-});
-
-// Start bot
-bot.launch();
-
-console.log('🤖 Paybox Telegram Bot started!');
-console.log('📱 Bot is ready to receive messages');
-
-// Enable graceful stop
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));

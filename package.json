@@ -1,12 +1,17 @@
 {
   "name": "paybox-telegram-bot",
-  "version": "1.0.0",
-  "description": "Telegram bot powered by Paybox - Web3 payments in Telegram",
+  "version": "2.0.0",
+  "description": "Telegram bot powered by Paybox - the non-custodial wallet for AI agents. Payments, transfers, swaps, x402 services and prediction markets, all from Telegram.",
   "main": "src/index.js",
   "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "test": "node --test",
+    "check": "find src -name '*.js' -exec node --check {} \\;"
   },
   "keywords": [
     "telegram",
@@ -15,15 +20,20 @@
     "crypto",
     "web3",
     "wallet",
-    "payments"
+    "payments",
+    "x402",
+    "agent",
+    "swap"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "telegraf": "^4.15.0",
-    "@paybox-sh/sdk": "^0.1.0",
-    "dotenv": "^16.3.1",
-    "axios": "^1.6.0",
-    "openai": "^4.20.0"
+    "@paybox-sh/sdk": "^0.8.5",
+    "@solana/web3.js": "^1.98.4",
+    "dotenv": "^16.4.5",
+    "openai": "^4.102.0",
+    "telegraf": "^4.16.3",
+    "tweetnacl": "^1.0.3",
+    "viem": "^2.40.3"
   }
 }

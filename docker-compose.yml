@@ -1,0 +1,18 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Webhook mode (optional). With these unset the bot uses long polling.
+      # BOT_WEBHOOK_URL: https://your-domain.com
+      # BOT_PORT: 3000
+      DATA_DIR: /app/data
+    volumes:
+      - bot-data:/app/data
+    # Map only if you use webhook mode:
+    # ports:
+    #   - "3000:3000"
+
+volumes:
+  bot-data:
