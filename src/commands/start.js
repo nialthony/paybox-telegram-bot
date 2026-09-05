@@ -1,35 +1,45 @@
 export async function startCommand(ctx) {
-  const welcomeMessage = `
-🎉 Welcome to **Paybox Telegram Bot**!
+  const ready = Boolean(ctx.paybox);
+  const status = ready
+    ? '🟢 Connected to Paybox'
+    : '🟠 Paybox not configured yet';
 
-I'm your gateway to Web3 payments, crypto transfers, and decentralized services - all from Telegram.
+  const message = [
+    '🎉 **Welcome to Paybox Bot**',
+    '',
+    'Your non-custodial wallet for AI agents — right inside Telegram. Check balances, send crypto, swap, pay for x402 services, and browse prediction markets. All signing happens in MoonX MPC; your keys never leave your device.',
+    '',
+    `Status: ${status}`,
+    ctx.canSign ? '✍️ Signing key: in-process signing enabled' : '✍️ Signing key: not set (read-only mode)',
+    ctx.hasAgent ? '🧠 AI mode: on — just chat with me' : '🧠 AI mode: off — set OPENAI_API_KEY to enable',
+    '',
+    '**Quick start:**',
+    '• /balance — portfolio overview',
+    '• /buy — fund a wallet with a card (MoonPay)',
+    '• /transfer — send crypto to any address',
+    '• /swap — swap tokens or bridge chains',
+    '• /markets — browse prediction markets',
+    '• /services — browse paid x402 services',
+    '• /help — everything else',
+  ].join('\n');
 
-**What I can do:**
-• 💰 Check your crypto portfolio balance
-• 🔄 Transfer crypto to friends
-• ✍️ Sign messages with your wallet
-• ✈️ Book flights, buy from Amazon, and more via x402 services
-• 📊 Trade prediction markets
-• 📧 Access your email inbox
-
-**Get started:**
-Use /help to see all available commands or /balance to check your portfolio.
-
-**Security:**
-All operations require your Paybox approval. Your private keys never leave your device.
-  `.trim();
-
-  await ctx.reply(welcomeMessage, {
+  await ctx.reply(message, {
     parse_mode: 'Markdown',
+    link_preview_options: { is_disabled: true },
     reply_markup: {
       inline_keyboard: [
         [
-          { text: '📖 Help', callback_data: 'help' },
-          { text: '💰 Balance', callback_data: 'balance' },
+          { text: '💰 Balance', callback_data: 'nav:balance' },
+          { text: '🔁 Swap', callback_data: 'nav:swap' },
+          { text: '📈 Markets', callback_data: 'nav:markets' },
         ],
         [
-          { text: '🔗 Paybox Docs', url: 'https://docs.paybox.sh' },
-          { text: '⭐ GitHub', url: 'https://github.com/moonpay/paybox' },
+          { text: '🛍 Services', callback_data: 'nav:services' },
+          { text: '📚 Help', callback_data: 'nav:help' },
+        ],
+        [
+          { text: '🔗 Paybox App', url: 'https://app.paybox.sh' },
+          { text: '📖 Docs', url: 'https://docs.paybox.sh' },
         ],
       ],
     },
