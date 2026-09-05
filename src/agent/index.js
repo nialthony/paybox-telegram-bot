@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { logger } from '../logger.js';
 import { appendHistory } from '../store/sessions.js';
+import { MONEY_INTENTS, requestConfirmation } from '../utils/confirm.js';
 
 /**
  * Natural-language mode.
@@ -45,6 +46,7 @@ Rules:
 - Token symbols: ETH (Ethereum), BASE (ETH on Base), SOL (Solana), USDC, USDT, WETH, USDC_BASE, USDC_SOL.
 - Amounts are plain decimals, e.g. "0.05".
 - Only choose an intent when the request clearly fits it. Otherwise reply in chat with a helpful pointer (e.g. mention /help).
+- Money intents (transfer, swap, pay, use_service) are shown to the user for a one-tap confirmation before running — phrase replies accordingly ("I'll send it once you confirm").
 - The reply field is ONE short sentence (max ~25 words), never a JSON blob.`;
 
 export class PayboxAgent {
@@ -112,6 +114,19 @@ export async function executeIntent(dispatcher, ctx, result) {
     // Fire-and-forget the preamble so the tool's own progress message follows.
     ctx.reply(`🧠 ${reply}`).catch(() => {});
   }
+
+  // Confirm-before-send: natural-language money moves need a one-tap ✅
+  // before anything runs. Nothing the model decides bypasses this.
+  if (MONEY_INTENTS.has(intent)) {
+    const approved = await requestConfirmation({
+      ctx,
+      intent,
+      args,
+      timeoutMs: ctx.config?.agentConfirmTimeoutMs,
+    });
+    if (!approved) return;
+  }
+
   await run(ctx, args);
 }
 

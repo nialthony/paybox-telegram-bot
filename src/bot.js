@@ -4,6 +4,7 @@ import { setupMiddleware } from './middleware/index.js';
 import { setupActions } from './actions/index.js';
 import { handleNaturalLanguage, PayboxAgent } from './agent/index.js';
 import { pollerCount } from './utils/poll.js';
+import { registerConfirmActions } from './utils/confirm.js';
 
 import { startCommand } from './commands/start.js';
 import { helpCommand } from './commands/help.js';
@@ -27,6 +28,8 @@ import {
 import { historyCommand } from './commands/history.js';
 import { registerCommand, whoisCommand, unregisterCommand } from './commands/register.js';
 import { statsCommand } from './commands/stats.js';
+import { splitCommand } from './commands/split.js';
+import { scheduleCommand } from './commands/schedule.js';
 
 const COMMAND_LIST = [
   { command: 'start', description: 'Welcome + status' },
@@ -52,13 +55,15 @@ const COMMAND_LIST = [
   { command: 'register', description: 'Save an address to the book' },
   { command: 'whois', description: 'Look up the address book' },
   { command: 'stats', description: 'Bot usage counters' },
+  { command: 'split', description: 'Split a group expense & settle it' },
+  { command: 'schedule', description: 'Schedule recurring commands' },
 ];
 
 /**
  * Assemble the bot: context wiring, middleware, commands, actions and the
  * natural-language fallback.
  */
-export function createBot({ config, paybox, sessions, registry, stats }) {
+export function createBot({ config, paybox, sessions, registry, stats, pending, splits, jobs }) {
   const bot = new Telegraf(config.telegramBotToken, {
     telegram: { webhookReply: false },
   });
@@ -86,6 +91,8 @@ export function createBot({ config, paybox, sessions, registry, stats }) {
     perp: perpCommand,
     register: registerCommand,
     stats: statsCommand,
+    split: splitCommand,
+    schedule: scheduleCommand,
   };
 
   const agent = new PayboxAgent(config, logger);
@@ -98,9 +105,16 @@ export function createBot({ config, paybox, sessions, registry, stats }) {
   bot.context.sessions = sessions;
   bot.context.registry = registry;
   bot.context.stats = stats;
+  bot.context.pending = pending ?? null;
+  bot.context.splits = splits ?? null;
+  bot.context.jobs = jobs ?? null;
   bot.context.agent = agent;
   bot.context.dispatcher = dispatcher;
   bot.context.pollerCount = pollerCount;
+
+  // Confirm-before-send callbacks (must be registered BEFORE setupActions,
+  // whose catch-all would otherwise swallow them).
+  registerConfirmActions(bot);
 
   setupMiddleware({ bot, config, sessions, stats });
 
@@ -129,6 +143,8 @@ export function createBot({ config, paybox, sessions, registry, stats }) {
   bot.command('whois', (ctx) => whoisCommand(ctx, parseArgs(ctx)));
   bot.command('unregister', (ctx) => unregisterCommand(ctx, parseArgs(ctx)));
   bot.command('stats', (ctx) => statsCommand(ctx));
+  bot.command('split', (ctx) => splitCommand(ctx, parseArgs(ctx)));
+  bot.command('schedule', (ctx) => scheduleCommand(ctx, parseArgs(ctx)));
 
   // Inline-keyboard callbacks
   setupActions({ bot, dispatcher });

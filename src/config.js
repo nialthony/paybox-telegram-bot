@@ -54,6 +54,13 @@ function buildConfig(env = process.env) {
     // Behaviour
     requestTimeoutMs: int(env.REQUEST_TIMEOUT_MS, 5 * 60 * 1000), // approval wait ceiling
     pollIntervalMs: int(env.POLL_INTERVAL_MS, 4000),
+    /** How long an AI confirm-before-send card stays valid. */
+    agentConfirmTimeoutMs: int(env.AGENT_CONFIRM_TIMEOUT_MS, 90 * 1000),
+    /** How long the on-chain tx watcher follows a broadcast. */
+    txConfirmTimeoutMs: int(env.TX_CONFIRM_TIMEOUT_MS, 10 * 60 * 1000),
+    /** Scheduler tick + timezone for `daily` jobs. */
+    schedulerTickMs: int(env.SCHEDULER_TICK_MS, 20 * 1000),
+    schedulerTz: env.SCHEDULER_TZ || 'UTC',
     dataDir,
     logLevel: env.LOG_LEVEL || 'info',
 
