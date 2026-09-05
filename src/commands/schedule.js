@@ -1,4 +1,4 @@
-import { UsageError } from '../middleware/index.js';
+import { UsageError, UnauthorizedError } from '../middleware/index.js';
 import { parseInterval, parseDaily, validateSchedulable } from '../store/jobs.js';
 import { describeJob } from '../scheduler.js';
 import { formatTimestamp } from '../utils/format.js';
@@ -14,6 +14,8 @@ import { formatTimestamp } from '../utils/format.js';
  * Every run goes through the normal command dispatcher — validation and
  * passkey approvals included — so a scheduled /transfer still waits for your
  * approval each time it fires.
+ *
+ * Security (v2.1.1): cancel|pause|resume check job.userId === ctx.from.id (or owner).
  */
 export async function scheduleCommand(ctx, args) {
   if (!ctx.jobs) {
@@ -123,6 +125,13 @@ function requireJob(ctx, id) {
   if (!job || job.chatId !== ctx.chat.id) {
     throw new UsageError(`❌ No scheduled job \`${id}\` in this chat.`);
   }
+  // L4: check ownership by userId, not just chat
+  const callerId = ctx.from?.id ?? null;
+  const ownerId = ctx.config?.ownerTelegramId ?? null;
+  if (job.userId && callerId && job.userId !== callerId && ownerId !== callerId) {
+    throw new UnauthorizedError('🔒 Only the job owner can manage this scheduled job.');
+  }
+  // If job has no userId (legacy), allow owner or anyone in same chat? For security, require owner if callerId differs from legacy? But keep backward compat: if no userId, only block if owner exists and caller is not owner? Simpler: if job.userId is set, enforce; if not, allow (legacy).
   return job;
 }
 

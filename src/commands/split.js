@@ -1,7 +1,7 @@
 import { UsageError } from '../middleware/index.js';
 import { resolveToken } from '../utils/tokens.js';
 import { parseAmount, isTelegramHandle, sanitizeText } from '../utils/validate.js';
-import { formatTimestamp } from '../utils/format.js';
+import { formatTimestamp, escapeMd } from '../utils/format.js';
 import { microToAmount } from '../store/splits.js';
 import { executeTransfer } from './transfer.js';
 
@@ -19,6 +19,13 @@ import { executeTransfer } from './transfer.js';
  * their share. The bot never pulls money from participants — it can only
  * send from the owner's wallet, so `settle` is how the *owner* pays their
  * share to the payer; everyone else settles out-of-band and is marked paid.
+ *
+ * Security (v2.1.1):
+ *  - Payer identity is bound to immutable Telegram user id (createdBy / payer.userId),
+ *    not mutable username. Usernames are display-only.
+ *  - Payer actions (markPaid, cancel) check userId, not handle.
+ *  - Settle payee is resolved via payerUserId + stored address, not mutable handle.
+ *  - Descriptions are escaped for Markdown.
  */
 export async function splitCommand(ctx, args) {
   if (!ctx.splits) {
@@ -56,6 +63,13 @@ function usage(ctx) {
 
 function myHandle(ctx) {
   return ctx.from?.username ? `@${ctx.from.username}` : null;
+}
+
+function isPayerUser(split, userId) {
+  if (!userId) return false;
+  if (split.createdBy && split.createdBy === userId) return true;
+  if (split.payer?.userId && split.payer.userId === userId) return true;
+  return false;
 }
 
 async function createSplit(ctx, args) {
@@ -97,10 +111,20 @@ async function createSplit(ctx, args) {
   }
 
   const payerHandle = myHandle(ctx);
+  const payerUserId = ctx.from?.id ?? null;
+  // Try to resolve payer's own address at creation time for secure settlement
+  let payerAddress = null;
+  if (payerHandle) {
+    const payerEntry = ctx.registry?.byHandle(payerHandle);
+    if (payerEntry) payerAddress = payerEntry.address;
+  }
+
   const split = ctx.splits.create({
     chatId: ctx.chat.id,
-    createdBy: ctx.from?.id ?? null,
+    createdBy: payerUserId,
     payerHandle: payerHandle ? payerHandle.slice(1).toLowerCase() : null,
+    payerUserId,
+    payerAddress,
     description,
     totalAmount: amount,
     tokenSymbol: chain.nativeSymbol,
@@ -120,12 +144,13 @@ function renderSplit(split, { created = false } = {}) {
   const lines = [];
   lines.push(created ? `💸 **Split created** — \`${split.id}\`` : `💸 **Split** — \`${split.id}\``);
   lines.push('');
-  lines.push(`_${split.description}_`);
-  lines.push(`Total: ${split.totalAmount} ${split.tokenSymbol} (${split.chainLabel}) · ${formatTimestamp(split.createdAt)}`);
+  // L2: escape user-controlled description
+  lines.push(`_${escapeMd(split.description)}_`);
+  lines.push(`Total: ${split.totalAmount} ${escapeMd(split.tokenSymbol)} (${escapeMd(split.chainLabel)}) · ${formatTimestamp(split.createdAt)}`);
   lines.push('');
   for (const p of split.participants) {
-    const who = p.isPayer ? `${p.handle ? `@${p.handle}` : 'payer'} (paid the bill)` : `@${p.handle}`;
-    const share = `${microToAmount(p.shareMicro)} ${split.tokenSymbol}`;
+    const who = p.isPayer ? `${p.handle ? `@${escapeMd(p.handle)}` : 'payer'} (paid the bill)` : `@${escapeMd(p.handle)}`;
+    const share = `${microToAmount(p.shareMicro)} ${escapeMd(split.tokenSymbol)}`;
     lines.push(`${p.paid ? '✅' : '⬜'} ${who} — ${share}`);
   }
   if (split.status === 'settled') lines.push('', '🎉 All settled up!');
@@ -171,43 +196,78 @@ async function settleSplit(ctx, id) {
   const split = requireSplit(ctx, id);
 
   const handle = myHandle(ctx);
-  if (!handle) {
-    throw new UsageError('❌ You need a Telegram username to settle a split (so the payer can be resolved).');
-  }
-  const normalized = handle.slice(1).toLowerCase();
+  const callerId = ctx.from?.id ?? null;
 
-  if (normalized === split.payer?.handle) {
+  if (!handle && !callerId) {
+    throw new UsageError('❌ You need a Telegram username or id to settle a split.');
+  }
+
+  // Payer cannot settle their own share — check by userId first, then handle fallback
+  if (callerId && isPayerUser(split, callerId)) {
+    throw new UsageError(
+      '❌ You are the payer here — others pay *you*. When they do, mark them with `/split paid ' + split.id + ' @who`.'
+    );
+  }
+  const normalized = handle ? handle.slice(1).toLowerCase() : null;
+  if (normalized && split.payer?.handle && normalized === split.payer.handle && !split.payer?.userId) {
+    // Fallback for old splits without userId
     throw new UsageError(
       '❌ You are the payer here — others pay *you*. When they do, mark them with `/split paid ' + split.id + ' @who`.'
     );
   }
 
-  const participant = ctx.splits.participant(split, handle);
+  // Find participant — try by handle, then by userId if available
+  let participant = null;
+  if (handle) participant = ctx.splits.participant(split, handle);
+  if (!participant && callerId) participant = ctx.splits.participantByUserId(split, callerId);
+  // If still not found, try handle lookup via stored participants that may have no handle but userId
+  if (!participant && handle) {
+    // last resort: check if caller is participant by handle
+    participant = ctx.splits.participant(split, handle);
+  }
+
   if (!participant) {
     throw new UsageError(`❌ You are not part of ${split.id}.`);
   }
   if (participant.paid) {
     throw new UsageError(`✅ Your share of ${split.id} is already settled.`);
   }
-  if (!split.payer?.handle) {
-    throw new UsageError('❌ The payer of this split has no Telegram username, so their address cannot be resolved.');
+
+  // Resolve payer address securely: prefer stored address (bound to userId at creation), fallback to registry
+  let payerAddress = split.payer?.address || null;
+  let payerHandleForTransfer = split.payer?.handle ? `@${split.payer.handle}` : null;
+
+  if (!payerAddress) {
+    if (!split.payer?.handle) {
+      throw new UsageError('❌ The payer of this split has no Telegram username and no stored address, so their address cannot be resolved.');
+    }
+    const payerEntry = ctx.registry?.byHandle(`@${split.payer.handle}`);
+    if (!payerEntry) {
+      throw new UsageError(
+        `❌ The payer @${split.payer.handle} is not in the address book — save their address with /register first.`
+      );
+    }
+    payerAddress = payerEntry.address;
+    payerHandleForTransfer = `@${split.payer.handle}`;
   }
-  const payerEntry = ctx.registry?.byHandle(`@${split.payer.handle}`);
-  if (!payerEntry) {
-    throw new UsageError(
-      `❌ The payer @${split.payer.handle} is not in the address book — save their address with /register first.`
-    );
+
+  // Use address directly if we have it, otherwise use handle (transfer will resolve via registry)
+  const recipientInput = payerAddress || payerHandleForTransfer;
+  if (!recipientInput) {
+    throw new UsageError('❌ Cannot resolve payer address for settlement.');
   }
 
   const shareAmount = microToAmount(participant.shareMicro);
   const result = await executeTransfer(ctx, {
-    recipientInput: `@${split.payer.handle}`,
+    recipientInput,
     amount: Number(shareAmount),
     tokenInput: split.tokenSymbol,
   });
 
   if (result?.ok) {
-    const updated = ctx.splits.markPaid(split.id, handle, { txId: result.txId, how: 'transfer' });
+    // Mark paid by handle if available, else by participant handle
+    const markHandle = participant.handle ? `@${participant.handle}` : handle;
+    const updated = ctx.splits.markPaid(split.id, markHandle, { txId: result.txId, how: 'transfer' });
     await ctx.reply(renderSplit(updated), { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } });
     ctx.stats?.hit('split_settled');
   }
@@ -219,10 +279,15 @@ async function markPaid(ctx, id, handle) {
 
   const split = requireSplit(ctx, id);
 
-  const me = myHandle(ctx);
-  const normalized = me ? me.slice(1).toLowerCase() : null;
-  if (normalized !== split.payer?.handle) {
-    throw new UsageError('❌ Only the payer can mark participants as paid.');
+  const callerId = ctx.from?.id ?? null;
+  // M3: authorize by userId, not handle
+  if (!isPayerUser(split, callerId)) {
+    // Fallback for old splits: check handle
+    const me = myHandle(ctx);
+    const normalized = me ? me.slice(1).toLowerCase() : null;
+    if (normalized !== split.payer?.handle) {
+      throw new UsageError('❌ Only the payer can mark participants as paid.');
+    }
   }
   if (!isTelegramHandle(handle)) {
     throw new UsageError(`❌ "${handle}" is not a valid Telegram handle.`);
@@ -237,10 +302,17 @@ async function cancelSplit(ctx, id) {
 
   const split = requireSplit(ctx, id);
 
-  const me = myHandle(ctx);
-  const normalized = me ? me.slice(1).toLowerCase() : null;
-  if (normalized !== split.payer?.handle && ctx.from?.id !== split.createdBy) {
-    throw new UsageError('❌ Only the payer can cancel this split.');
+  const callerId = ctx.from?.id ?? null;
+  const isOwner = ctx.config?.ownerTelegramId && callerId === ctx.config.ownerTelegramId;
+
+  // M3: payer check by userId
+  if (!isPayerUser(split, callerId) && !isOwner) {
+    // Fallback for old splits without userId: check createdBy and handle
+    const me = myHandle(ctx);
+    const normalized = me ? me.slice(1).toLowerCase() : null;
+    if (normalized !== split.payer?.handle && callerId !== split.createdBy) {
+      throw new UsageError('❌ Only the payer can cancel this split.');
+    }
   }
 
   const cancelled = ctx.splits.cancel(id);

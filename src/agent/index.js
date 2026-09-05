@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { logger } from '../logger.js';
 import { appendHistory } from '../store/sessions.js';
-import { MONEY_INTENTS, requestConfirmation } from '../utils/confirm.js';
+import { SENSITIVE_INTENTS, requestConfirmation } from '../utils/confirm.js';
 
 /**
  * Natural-language mode.
@@ -46,7 +46,7 @@ Rules:
 - Token symbols: ETH (Ethereum), BASE (ETH on Base), SOL (Solana), USDC, USDT, WETH, USDC_BASE, USDC_SOL.
 - Amounts are plain decimals, e.g. "0.05".
 - Only choose an intent when the request clearly fits it. Otherwise reply in chat with a helpful pointer (e.g. mention /help).
-- Money intents (transfer, swap, pay, use_service) are shown to the user for a one-tap confirmation before running — phrase replies accordingly ("I'll send it once you confirm").
+- Money intents (transfer, swap, pay, use_service) and sensitive intents (secret, sign) are shown to the user for a one-tap confirmation before running — phrase replies accordingly ("I'll send it once you confirm").
 - The reply field is ONE short sentence (max ~25 words), never a JSON blob.`;
 
 export class PayboxAgent {
@@ -109,15 +109,32 @@ export async function executeIntent(dispatcher, ctx, result) {
     return;
   }
 
+  // H1: open-deployment gate for AI intents as well
+  if (!ctx.config?.ownerTelegramId && !ctx.config?.openMode) {
+    const blocked = ['transfer', 'swap', 'pay', 'use_service', 'sign', 'secret', 'schedule'];
+    const isSplitSettle = intent === 'split' && Array.isArray(params?.args) && params.args[0] === 'settle';
+    // For AI, intent names are direct (transfer etc). Split/schedule are not in AI catalog currently,
+    // but we block the sensitive ones anyway.
+    if (blocked.includes(intent) || isSplitSettle) {
+      await ctx.reply(
+        '🔒 **Open deployment protection**\n\n' +
+          'This bot has no `OWNER_TELEGRAM_ID` set, so money + sensitive commands are blocked by default.\n' +
+          'Set `OWNER_TELEGRAM_ID` or `PAYBOX_OPEN_MODE=1`.',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+  }
+
   const args = paramsToArgs(intent, params);
   if (reply) {
     // Fire-and-forget the preamble so the tool's own progress message follows.
     ctx.reply(`🧠 ${reply}`).catch(() => {});
   }
 
-  // Confirm-before-send: natural-language money moves need a one-tap ✅
+  // Confirm-before-send: natural-language sensitive moves need a one-tap ✅
   // before anything runs. Nothing the model decides bypasses this.
-  if (MONEY_INTENTS.has(intent)) {
+  if (SENSITIVE_INTENTS.has(intent)) {
     const approved = await requestConfirmation({
       ctx,
       intent,

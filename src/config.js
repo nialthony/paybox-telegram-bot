@@ -17,7 +17,7 @@ const int = (value, fallback) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
-function buildConfig(env = process.env) {
+export function buildConfig(env = process.env) {
   const dataDir = path.resolve(env.DATA_DIR || 'data');
 
   const config = {
@@ -29,10 +29,13 @@ function buildConfig(env = process.env) {
     botWebhookUrl: env.BOT_WEBHOOK_URL || '',
     botPort: int(env.BOT_PORT, 3000),
     botWebhookPath: env.BOT_WEBHOOK_PATH || '/webhook',
+    botWebhookSecret: env.BOT_WEBHOOK_SECRET || '',
     /** If set, only this Telegram user can run financial commands. */
     ownerTelegramId: env.OWNER_TELEGRAM_ID ? int(env.OWNER_TELEGRAM_ID, 0) : null,
     /** If set, the bot refuses to run in group chats at all. */
     dmOnly: bool(env.BOT_DM_ONLY, false),
+    /** Explicit acknowledgement that an open deployment is intended. */
+    openMode: bool(env.PAYBOX_OPEN_MODE, false),
 
     // Paybox
     payboxApiKey: env.PAYBOX_API_KEY || '',
@@ -98,6 +101,9 @@ export function validateConfig(cfg = config) {
   }
   if (cfg.botWebhookUrl && !/^https:\/\//.test(cfg.botWebhookUrl)) {
     problems.push('BOT_WEBHOOK_URL must be an https:// URL (Telegram requires TLS).');
+  }
+  if (cfg.botWebhookUrl && !cfg.botWebhookSecret) {
+    problems.push('BOT_WEBHOOK_SECRET is required in webhook mode — set a long random value (Telegram will send X-Telegram-Bot-Api-Secret-Token).');
   }
   if (cfg.payboxApiKey && !cfg.payboxSigningKey) {
     problems.push(

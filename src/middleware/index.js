@@ -5,6 +5,10 @@ import { escapeMd } from '../utils/format.js';
 /**
  * Middleware pipeline: request logging, session attachment, authorization,
  * rate limiting and a final error guard.
+ *
+ * Security (v2.1.1):
+ *  - When OWNER_TELEGRAM_ID is unset, money + sensitive commands are blocked
+ *    unless PAYBOX_OPEN_MODE=1 is explicitly set.
  */
 
 export class UnauthorizedError extends Error {
@@ -58,6 +62,25 @@ class TokenBucket {
   }
 }
 
+// Commands that move money or reveal secrets — blocked in open mode without acknowledgement
+const SENSITIVE_COMMANDS = new Set([
+  'transfer',
+  'swap',
+  'pay',
+  'use_service',
+  'sign',
+  'secret',
+  'schedule',
+]);
+
+function isSensitiveCommand(cmd, args) {
+  if (SENSITIVE_COMMANDS.has(cmd)) return true;
+  if (cmd === 'split' && args[0] === 'settle') return true;
+  // Also block split creation (amount) as it can be abused for spam? But spec says split settle specifically.
+  // We keep only settle blocked per spec; creation is not money movement.
+  return false;
+}
+
 export function setupMiddleware({ bot, config, sessions, stats }) {
   const limiter = new TokenBucket({ capacity: 12, refillPerSecond: 1.2 });
 
@@ -83,7 +106,7 @@ export function setupMiddleware({ bot, config, sessions, stats }) {
     await next();
   });
 
-  // 3. Authorization + DM/group policy
+  // 3. Authorization + DM/group policy + H1 open-mode gate
   bot.use(async (ctx, next) => {
     const chatType = ctx.chat?.type;
     const isCallback = Boolean(ctx.callbackQuery);
@@ -99,6 +122,26 @@ export function setupMiddleware({ bot, config, sessions, stats }) {
         await ctx.reply('🔒 Sorry, this is a private bot. It is locked to a single owner.');
       }
       return;
+    }
+
+    // H1: open-deployment exposure — block money + sensitive commands unless PAYBOX_OPEN_MODE=1
+    if (!config.ownerTelegramId && !config.openMode) {
+      const text = ctx.message?.text || '';
+      const match = text.match(/^\/([a-z_]+)(?:@\w+)?(?:\s|$)/);
+      if (match) {
+        const cmd = match[1];
+        const args = text.replace(/^\/\w+(?:@\w+)?/, '').trim().split(/\s+/).filter(Boolean);
+        if (isSensitiveCommand(cmd, args)) {
+          await ctx.reply(
+            '🔒 **Open deployment protection**\n\n' +
+              'This bot has no `OWNER_TELEGRAM_ID` set, so money + sensitive commands are blocked by default.\n' +
+              'Set `OWNER_TELEGRAM_ID` (from @userinfobot) to lock it to you, or set `PAYBOX_OPEN_MODE=1` to explicitly acknowledge the risk.\n\n' +
+              'Read-only commands (balance, markets, help…) stay open.',
+            { parse_mode: 'Markdown' }
+          );
+          return;
+        }
+      }
     }
 
     await next();
@@ -117,7 +160,7 @@ export function setupMiddleware({ bot, config, sessions, stats }) {
 
   // 5. Stats (text commands only)
   bot.use(async (ctx, next) => {
-    const match = ctx.message?.text?.match(/^\/([a-z_]+)(?:@\w+)?(?:\s|$)/);
+    const match = ctx.message?.text?.match(/^\/([a-z_]+)(?:@\w+)?(?:\\s|$)/);
     if (match) stats.hit(match[1]);
     await next();
   });
@@ -141,8 +184,8 @@ export function setupMiddleware({ bot, config, sessions, stats }) {
       const friendly = explainFailure(error);
       const detail = escapeMd(error?.message || 'unknown error').slice(0, 200);
       const text = friendly
-        ? `${friendly}\n\n_Detail: ${detail}_`
-        : `❌ Something went wrong.\n\n_Detail: ${detail}_`;
+        ? `${friendly}\\n\\n_Detail: ${detail}_`
+        : `❌ Something went wrong.\\n\\n_Detail: ${detail}_`;
 
       try {
         if (ctx.callbackQuery) {

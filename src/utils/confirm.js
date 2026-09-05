@@ -4,17 +4,28 @@ import { logger } from '../logger.js';
 /**
  * Confirm-before-send for AI mode.
  *
- * Natural-language money moves (transfer / swap / pay / use_service) are
- * never executed straight away: the bot shows exactly which command it is
- * about to run and waits for a one-tap ✅ / ✏️ / ❌. Nothing moves until
- * the user confirms; the callback is bound to the user who asked, and
- * confirmations expire.
+ * Natural-language money moves (transfer / swap / pay / use_service) plus
+ * sensitive operations (secret, sign) are never executed straight away: the
+ * bot shows exactly which command it is about to run and waits for a one-tap
+ * ✅ / ✏️ / ❌. Nothing moves until the user confirms; the callback is bound
+ * to the asking user, and confirmations expire.
  *
  * Confirmations are deliberately in-memory and short-lived — this is an
  * interactive gate, not durable state.
  */
 
+// Original money intents (kept for backward compat)
 export const MONEY_INTENTS = new Set(['transfer', 'swap', 'pay', 'use_service']);
+
+// v2.1.1: secret and sign also require confirmation (sensitive intents)
+export const SENSITIVE_INTENTS = new Set([
+  'transfer',
+  'swap',
+  'pay',
+  'use_service',
+  'secret',
+  'sign',
+]);
 
 const CLEANUP_INTERVAL_MS = 5_000;
 

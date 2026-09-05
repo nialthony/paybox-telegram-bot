@@ -58,6 +58,37 @@ async function main() {
     process.exit(1);
   }
 
+  // H3: webhook mode must have a secret token; refuse to start otherwise.
+  if (config.botWebhookUrl && !config.botWebhookSecret) {
+    logger.error(
+      'FATAL: BOT_WEBHOOK_URL is set but BOT_WEBHOOK_SECRET is missing — refusing to start in webhook mode. ' +
+        'Set a long random value for BOT_WEBHOOK_SECRET (e.g. `openssl rand -hex 32`).'
+    );
+    process.exit(1);
+  }
+
+  // H3: recommend a randomized webhook path when unset / default.
+  if (config.botWebhookUrl && (!process.env.BOT_WEBHOOK_PATH || config.botWebhookPath === '/webhook')) {
+    logger.warn(
+      '⚠️  SECURITY: BOT_WEBHOOK_PATH is default (/webhook) — use a randomized secret path, e.g. /webhook-<random>, ' +
+        'in addition to BOT_WEBHOOK_SECRET, to reduce probing.'
+    );
+  }
+
+  // H1: loud warning when owner lock is not set.
+  if (!config.ownerTelegramId) {
+    logger.warn(
+      '⚠️  SECURITY WARNING: OWNER_TELEGRAM_ID is not set — this bot is open to anyone who knows its handle. ' +
+        'Lock it with OWNER_TELEGRAM_ID (from @userinfobot) or explicitly acknowledge the risk with PAYBOX_OPEN_MODE=1.'
+    );
+    if (!config.openMode) {
+      logger.warn(
+        '🔒 Money + sensitive commands (transfer, swap, pay, use_service, sign, secret, split settle, schedule) are BLOCKED until ' +
+          'you set OWNER_TELEGRAM_ID or PAYBOX_OPEN_MODE=1. Read-only commands stay open.'
+      );
+    }
+  }
+
   ensureDataDir(config);
   assertValidTimeZone(config.schedulerTz);
 
@@ -93,11 +124,12 @@ async function main() {
         path: config.botWebhookPath,
         port: config.botPort,
         host: '0.0.0.0',
+        secretToken: config.botWebhookSecret,
         cb: makeHealthzHandler({ pending, jobs }),
       },
     });
     logger.info(
-      `webhook serving on :${config.botPort} (${config.botWebhookPath} + /healthz) → ${config.botWebhookUrl}${config.botWebhookPath}`
+      `webhook serving on :${config.botPort} (${config.botWebhookPath} + /healthz) → ${config.botWebhookUrl}${config.botWebhookPath} (secretToken: ${config.botWebhookSecret ? 'set' : 'MISSING'})`
     );
   } else {
     logger.info('using long polling (set BOT_WEBHOOK_URL to switch to webhook mode)');
