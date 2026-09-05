@@ -173,10 +173,93 @@ Bot:    🧠 Checking your portfolio…
 
 User:   send 10 usdc to @alice on base
 Bot:    🧠 On it — sending 10 USDC on Base to @alice.
+        ⚠️ Confirm before I run this
+        /transfer @alice 10 BASE
+        Nothing moves until you confirm.
+        [✅ Confirm] [✏️ Change] [❌ Cancel]
+
+User:   (taps ✅)
+Bot:    ✅ Confirmed — running it now…
         ⏳ Preparing transfer… (base chain flow, same as example 3)
 ```
 
-## 13. Locked / degraded modes
+Money intents in AI mode (transfer, swap, pay, use_service) always show the
+confirm card first — bound to the asking user, expiring after 90s.
+
+## 13. Transfer followed to finality (v2.1)
+
+```
+User:   /transfer @alice 0.05 ETH
+Bot:    … approval + broadcast flow as in example 3 …
+
+Bot:    📡 Broadcast to Ethereum
+        Tx: [0x5e1f…b3a7](https://etherscan.io/tx/0x5e1f…)
+        Waiting for inclusion in a block…
+
+Bot:    ✅ Included on Ethereum
+        Tx: [0x5e1f…b3a7](…)
+        Block: 22,501,443 · 1/12 confirmations
+        Watching until finality…
+
+Bot:    🔒 Final on Ethereum
+        Tx: [0x5e1f…b3a7](…)
+        Block: 22,501,443 · 12 confirmations
+        Done — this transaction is final on-chain.
+```
+
+And if the bot restarts mid-approval, the same message picks the flow back up:
+
+```
+Bot:    🔄 Bot restarted — picking this transfer back up where it left off…
+        🔐 Approval required … [✅ Approve in Paybox]
+```
+
+## 14. Group expense splitter (v2.1)
+
+```
+User:   /split 0.09 ETH team lunch @alice @bob
+Bot:    💸 Split created — spl_1
+        _team lunch_
+        Total: 0.09 ETH (Ethereum)
+
+        ⬜ @alice — 0.03 ETH
+        ⬜ @bob — 0.03 ETH
+        ⬜ @nial (paid the bill) — 0.03 ETH
+
+User:   /split settle spl_1
+Bot:    ⏳ Preparing transfer … (to @nial, 0.03 ETH — approvals apply)
+        🔒 Final on Ethereum …
+
+Bot:    💸 Split — spl_1
+        ✅ @alice — 0.03 ETH
+        ⬜ @bob — 0.03 ETH
+        ✅ @nial (paid the bill) — 0.03 ETH
+
+User:   /split paid spl_1 @bob
+Bot:    💸 Split — spl_1
+        🎉 All settled up!
+```
+
+## 15. Command scheduler (v2.1)
+
+```
+User:   /schedule add every 7d /transfer @alice 0.01 ETH
+Bot:    ⏰ Scheduled — job_1
+        /transfer @alice 0.01 ETH
+        Next run: Sep 12, 2026, 09:00 (UTC)
+
+…a week later, automatically…
+
+Bot:    ⏰ Scheduled run (job_1): /transfer @alice 0.01 ETH
+        🔐 Approval required … [✅ Approve in Paybox]   ← every run still asks
+
+User:   /schedule list
+Bot:    ⏰ Scheduled jobs in this chat
+        🟢 job_1 every 7d — /transfer @alice 0.01 ETH
+            next: Sep 12, 2026, 09:00 · last: Sep 5, 2026, 09:00
+```
+
+## 16. Locked / degraded modes
 
 Without `PAYBOX_SIGNING_KEY`:
 

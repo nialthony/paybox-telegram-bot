@@ -1,42 +1,63 @@
-# v2.0.0 — Paybox SDK 0.8.5 rebuild
+# v2.1.0 — Reliability, confirmations & automation
 
-Full rebuild of the Paybox Telegram Bot on **`@paybox-sh/sdk` 0.8.5** and the official Paybox REST surface — no MCP host required. Every money operation is passkey-approved or bounded by your Paybox grant; the bot remains fully non-custodial.
+The trust-and-automation release: payments that survive restarts, transactions followed to on-chain finality, an explicit ✅ before any AI-initiated money move, group expense splits, and a command scheduler whose every run still passes your normal approvals. The bot stays fully non-custodial — nothing below changes where keys live or who approves money.
 
 ## Highlights
 
-### 💸 Wallet & money movement
-- `/balance` — portfolio across all granted wallets (holdings, USD totals, 24h change)
-- `/transfer` — on-chain transfers on Ethereum, Base and Solana, with `@handle` resolution from the address book
-- `/swap` — token swaps **and cross-chain bridges** via MoonX routing
-- `/buy` — signed MoonPay fiat checkout links
-- `/pay` — merchant-scoped **one-time virtual cards** from a card credential
-- `/sign` — EIP-191 / EIP-712 / Solana message signatures; private keys never leave MoonX MPC
-- `/secret` — reveal scoped secret credentials (one-time tokens, raw mode with a raw grant)
+### 🛡 Reliability & trust (do-first)
 
-### 🛒 Services & markets
-- `/services` + `/use_service` — browse and pay for curated **x402** services
-- `/markets`, `/market`, `/orderbook`, `/price`, `/positions` — prediction markets with books and 7-day sparkline charts
-- `/perp` — Hyperliquid market data
+- **Crash-safe resume** — a restart no longer orphans a payment. In-flight
+  requests (including those parked at `pending_approval`) are persisted and
+  picked back up on boot, continuing on the same Telegram message: approval →
+  in-process signature → broadcast → confirmation. Requests that outlive the
+  approval window are watched in the background for up to 24h.
+- **Tx confirmation watcher** — "broadcast" ≠ "done". Status messages now
+  live-edit through on-chain finality with explorer links:
+  `📡 broadcast → ✅ included (n/12 confirmations) → 🔒 final`, and clearly
+  report reverted / failed transactions (Ethereum, Base, Solana).
+- **Confirm-before-send in AI mode** — chat-initiated money moves show the
+  exact command about to run and wait for a one-tap **✅ Confirm / ✏️ Change /
+  ❌ Cancel**. Bound to the asking user; expires in 90s; nothing moves without
+  the tap.
 
-### 🧠 AI agent mode
-- Natural-language DMs mapped to the **same validated command functions** as slash commands (set `OPENAI_API_KEY`) — nothing the model decides bypasses validation or approval flows
-- Per-user conversation memory (last 6 turns)
+### 🚀 High impact
 
-### 🛡️ Safety & engineering
-- Headless signing protocol re-implemented on the SDK (`/binding` → `/moonx-sign` → `/signature`) — passkey approvals complete without an iframe
-- Full approval lifecycle with live message edits: `pending_approval` → approval link → poll → in-process signing → broadcast → on-chain confirmation
-- Owner lock, DM-only mode, per-user rate limiting, secret redaction in all logs, crash-safe atomic JSON stores
-- Long-polling **or** webhook mode with `/healthz`, graceful shutdown, Docker image with healthcheck
-- 32 unit tests (`npm test`), zero native dependencies
+- **Group expense splitter** — `/split 0.09 ETH team lunch @alice @bob`:
+  even shares with exact fixed-point math (payer absorbs dust), balances via
+  `/split status`, real settlement via `/split settle` (a normal `/transfer`
+  → approvals apply), out-of-band marking via `/split paid`, `/split cancel`.
+- **Command scheduler** — `/schedule add every 6h /price ETH`,
+  `/schedule add daily 09:00 /balance` (`SCHEDULER_TZ`). Durable jobs,
+  restart-safe, no catch-up herds after downtime — and **every scheduled run
+  goes through the same dispatcher and passkey approvals** as a hand-typed
+  command. A scheduled transfer asks for approval each time it fires.
+  `/schedule list · pause · resume · cancel`; `/schedule` is not schedulable.
+
+### 🧱 Engineering
+
+- New crash-safe atomic stores: `pending.json`, `splits.json`, `jobs.json`
+- `/healthz` now reports pending requests, scheduled jobs and active tx watchers
+- Graceful shutdown stops scheduler, pollers, tx watchers, background
+  approval watchers and confirmation cards
+- 79 unit tests (`npm test`), up from 32 — zero native dependencies
+- New optional env vars: `AGENT_CONFIRM_TIMEOUT_MS`, `TX_CONFIRM_TIMEOUT_MS`,
+  `SCHEDULER_TICK_MS`, `SCHEDULER_TZ` (see `.env.example`)
 
 ## Upgrade notes
 
-- Requires **Node 18+** and `@paybox-sh/sdk ^0.8.5` (see `package.json`)
-- Copy `.env.example` → `.env` and re-check your Paybox grants in the app after upgrading
-- Docker: `docker compose up -d --build` (see `DEPLOYMENT.md`)
+- Drop-in replacement for v2.0.0 — no breaking changes, no new required config.
+- Requires Node 18+ and `@paybox-sh/sdk ^0.8.5` as before.
+- Existing data (address book, stats) is untouched; new stores are created on
+  first run.
 
 ## Security model
 
-Non-custodial by construction: the bot never sees private keys, card PANs or raw secrets. Signing happens in MoonX MPC; `always_approve` credentials pause for your passkey; virtual cards and payment tokens are single-use. Every request is visible in your Paybox audit log and in `/history`.
+Unchanged and non-negotiable: the bot never sees private keys, card PANs or
+raw secrets. Signing happens in MoonX MPC; `always_approve` credentials pause
+for your passkey — including on every scheduled run; virtual cards and payment
+tokens stay single-use; every request remains in your Paybox audit log and
+`/history`. The scheduler and AI mode are front doors to the *same* validated
+pipeline, never a bypass.
 
-**Full changelog**: https://github.com/nialthony/paybox-telegram-bot/compare/9776330...v2.0.0
+**Full changelog**: see [CHANGELOG.md](CHANGELOG.md) and
+[compare v2.0.0...v2.1.0](https://github.com/nialthony/paybox-telegram-bot/compare/v2.0.0...v2.1.0)

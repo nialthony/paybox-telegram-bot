@@ -29,6 +29,15 @@ Built on `@paybox-sh/sdk` v0.8 and the official Paybox REST surface (no MCP host
 | `/positions` | Your market positions |
 | `/perp [coin]` | Hyperliquid market data |
 
+### Reliability & automation (new in v2.1)
+| Command | What it does |
+| --- | --- |
+| `/split <amount> <token> <what> @a @b` | Group expense splitter — even shares, balances, settle via a real `/transfer` |
+| `/split settle <id>` · `/split paid <id> @user` | Pay your share to the payer (approvals apply) · mark out-of-band settlements |
+| `/schedule add every 6h /price ETH` | Run a command on an interval — **approvals still apply on every run** |
+| `/schedule add daily 09:00 /balance` | Run a command daily at a set time (`SCHEDULER_TZ`, default UTC) |
+| `/schedule list · pause · resume · cancel` | Manage scheduled jobs |
+
 ### Account & safety
 | Command | What it does |
 | --- | --- |
@@ -39,16 +48,19 @@ Built on `@paybox-sh/sdk` v0.8 and the official Paybox REST surface (no MCP host
 | `/stats` | Bot usage counters |
 
 ### Intelligence
-Set `OPENAI_API_KEY` and the bot understands natural language in DMs: *"send 5 USDC to @alice"*, *"how much ETH do I have?"*, *"any markets on the Fed decision?"*. The model maps your sentence to the **same command functions** as slash commands — nothing it decides bypasses validation or approval flows. Conversation memory is kept per user (in-memory, last 6 turns).
+Set `OPENAI_API_KEY` and the bot understands natural language in DMs: *"send 5 USDC to @alice"*, *"how much ETH do I have?"*, *"any markets on the Fed decision?"*. The model maps your sentence to the **same command functions** as slash commands — nothing it decides bypasses validation or approval flows — and every money move is gated by a **one-tap ✅ Confirm / ✏️ Change / ❌ Cancel card** before anything runs. Conversation memory is kept per user (in-memory, last 6 turns).
 
 ### Engineering
 - **Approval flows done right**: `pending_approval` → approval link → poll → finish in-process signing → broadcast → confirm on-chain, with live message edits the whole way
+- **Crash-safe resume**: in-flight requests are persisted and resumed after a restart, on the same message — a reboot no longer orphans a payment
+- **On-chain confirmation watcher**: broadcast → included (n/12 confirmations) → final, with explorer links; reverted/failed transactions reported as such
+- **Command scheduler**: durable recurring jobs whose every run passes the normal dispatcher and passkey approvals
 - **Headless signing protocol** re-implemented on top of the SDK (`/binding` → `/moonx-sign` → `/signature`) so passkey-approved requests complete without an iframe
 - Owner lock (`OWNER_TELEGRAM_ID`), DM-only mode, per-user rate limiting
 - Secret redaction in all logs, crash-safe JSON stores (atomic writes)
-- Long-polling **or** webhook mode with `/healthz`
-- Graceful shutdown, background poller tracking, Docker image with healthcheck
-- 32 unit tests (`npm test`), zero native dependencies
+- Long-polling **or** webhook mode with `/healthz` (reports pending requests, scheduled jobs, active watchers)
+- Graceful shutdown (scheduler, pollers, watchers), Docker image with healthcheck
+- 79 unit tests (`npm test`), zero native dependencies
 
 ---
 
