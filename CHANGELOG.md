@@ -1,5 +1,48 @@
 # Changelog
 
+## v2.1.1 — Security hardening
+
+**Security fixes (H3, H2, H1, M2, M3, L-batch):**
+
+- **H3 — Webhook forgery protection** (`src/index.js`, `src/config.js`):
+  - New env var `BOT_WEBHOOK_SECRET` — passed as Telegraf's `secretToken` launch option. Telegram then sends `X-Telegram-Bot-Api-Secret-Token` on every webhook call and Telegraf verifies it.
+  - Bot **refuses to start** in webhook mode when `BOT_WEBHOOK_SECRET` is missing.
+  - Logs a warning when `BOT_WEBHOOK_PATH` is the default `/webhook` — recommends a randomized path (e.g. `/webhook-<random>`) to reduce probing.
+  - Updated `.env.example` and `DEPLOYMENT.md`.
+
+- **H2 — Address-book poisoning protection** (`src/commands/register.js`, `src/store/registry.js`):
+  - `/register` may only bind a handle matching the caller's own Telegram username, unless caller is owner (`OWNER_TELEGRAM_ID`) — owner may register anyone.
+  - Never silently overwrites: requires explicit `--force` flag and shows old → new address in confirmation.
+  - `/unregister` enforces same own-handle policy.
+
+- **H1 — Open-deployment exposure lock** (`src/middleware/index.js`, `src/agent/index.js`, `src/config.js`):
+  - When `OWNER_TELEGRAM_ID` is unset, logs loud startup warning.
+  - Blocks money + sensitive commands (`transfer`, `swap`, `pay`, `use_service`, `sign`, `secret`, `split settle`, `schedule`) unless `PAYBOX_OPEN_MODE=1` is explicitly set.
+  - Read-only commands (`balance`, `markets`, `help`…) stay open. AI-mode money intents also blocked under same gate.
+
+- **M2 — AI-mode gates expanded** (`src/utils/confirm.js`, `src/agent/index.js`):
+  - `secret` and `sign` added to confirm-before-send set (`SENSITIVE_INTENTS`), so NL-triggered secret reveals and message signings also require one-tap ✅ card.
+  - `MONEY_INTENTS` kept for backward compat (4 items); new `SENSITIVE_INTENTS` is 6 items.
+
+- **M3 — Splits authorization by immutable user id** (`src/commands/split.js`, `src/store/splits.js`):
+  - Payer actions (`markPaid`, `cancel`) and settle-payee identity authorized by Telegram user id (`createdBy` / `payer.userId`), not mutable username. Usernames are display-only.
+  - Payer address captured at creation time when available; settlement prefers stored address over registry lookup by handle to prevent username-hijack.
+  - Store persists `payer.userId` and `payer.address` plus participant `userId` for payer.
+
+- **Low-severity batch**:
+  - **L1**: `__proto__`/`constructor`/`prototype` rejected as registry handles (prototype-pollution guard, safe `hasOwnProperty` checks).
+  - **L2**: `escapeMd()` on user-controlled text interpolated into Markdown (split descriptions, `/pay` merchant names, service names).
+  - **L4**: `/schedule cancel|pause|resume` checks `job.userId === ctx.from.id` (or caller is owner), not just chat.
+  - **L6**: Persist tx id to pending store **before** broadcasting, so crash between broadcast and untrack can't cause re-broadcast on resume; resume detects existing txId and jumps to watcher.
+
+**Tests & tooling:**
+
+- 94 tests (`npm test`) — 79 original green + 15 new focused security tests (registry poisoning, owner/open-mode gating, webhook-secret validation, splits authz by user id, escapeMd, schedule authz, pending txId persistence).
+- `npm run check` clean.
+- New env vars: `BOT_WEBHOOK_SECRET`, `PAYBOX_OPEN_MODE` (see `.env.example`).
+
+**Upgrade notes:** drop-in, no breaking changes except webhook mode now **requires** `BOT_WEBHOOK_SECRET`. Set it with `openssl rand -hex 32`. If you run an open bot intentionally, set `PAYBOX_OPEN_MODE=1` or lock with `OWNER_TELEGRAM_ID`.
+
 ## v2.1.0 — Reliability, confirmations & automation
 
 **Do-first reliability & trust:**

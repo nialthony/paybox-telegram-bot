@@ -15,6 +15,10 @@ import { logger } from '../logger.js';
  * chain and transfer details, and the Telegram message that has been
  * live-editing the status (so the resumed flow keeps editing the same
  * message the user already has on screen).
+ *
+ * Security (v2.1.1, L6): txId is persisted BEFORE broadcast, so a crash
+ * between broadcast and untrack cannot cause a confusing re-broadcast attempt
+ * on resume — resume can detect txId and jump straight to watching.
  */
 export class PendingStore {
   constructor({ dir }) {
@@ -34,13 +38,29 @@ export class PendingStore {
       throw new Error('pending.track requires a requestId');
     }
     this.store.mutate((data) => {
+      const existing = data.requests[record.requestId] || {};
       data.requests[record.requestId] = {
         kind: 'transfer',
-        createdAt: new Date().toISOString(),
+        createdAt: existing.createdAt || new Date().toISOString(),
+        ...existing,
         ...record,
+        // Preserve createdAt if already set
+        createdAt: existing.createdAt || record.createdAt || new Date().toISOString(),
       };
     });
     return this.get(record.requestId);
+  }
+
+  /** Merge patch into existing record (e.g. { txId }). */
+  update(requestId, patch) {
+    let updated = null;
+    this.store.mutate((data) => {
+      const rec = data.requests[requestId];
+      if (!rec) return;
+      data.requests[requestId] = { ...rec, ...patch };
+      updated = data.requests[requestId];
+    });
+    return updated;
   }
 
   get(requestId) {

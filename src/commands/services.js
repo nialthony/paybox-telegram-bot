@@ -1,13 +1,15 @@
 import { UsageError } from '../middleware/index.js';
 import { requireWallet } from './shared.js';
 import { sanitizeText, isUrl, truncateUtf8 } from '../utils/validate.js';
+import { escapeMd } from '../utils/format.js';
 import { logger } from '../logger.js';
 
 /**
  * /services [query]       — discover curated x402 paid services
  * /use_service <url> [method] [json-body] — pay + fetch via Paybox gateway
+ *
+ * Security (v2.1.1): service names / descriptions are escaped for Markdown.
  */
-
 export async function servicesCommand(ctx, args) {
   const query = sanitizeText(args.join(' '), 200);
   const progress = await ctx.reply(query ? `🔍 Searching x402 services for "${query}"…` : '🔍 Loading curated x402 services…');
@@ -45,9 +47,9 @@ export async function servicesCommand(ctx, args) {
   const buttons = [];
   for (let i = 0; i < Math.min(services.length, 10); i++) {
     const service = services[i];
-    const name = service.name || service.resource || service.url || `service ${i + 1}`;
-    const price = service.price_hint || service.price || '';
-    const description = (service.description || '').replace(/\s+/g, ' ').slice(0, 90);
+    const name = escapeMd(service.name || service.resource || service.url || `service ${i + 1}`);
+    const price = escapeMd(service.price_hint || service.price || '');
+    const description = escapeMd((service.description || '').replace(/\s+/g, ' ').slice(0, 90));
     lines.push(`${i + 1}. **${name}**${price ? ` — ${price}` : ''}`);
     if (description) lines.push(`   _${description}_`);
     buttons.push({ text: `${i + 1}`, callback_data: `svc:use:${i}` });
@@ -106,7 +108,7 @@ export async function useServiceCommand(ctx, args) {
     );
   }
 
-  const progress = await ctx.reply(`🛍 Paying for ${sanitizeText(url, 80)}…\n\n_Probing the 402 endpoint…_`, {
+  const progress = await ctx.reply(`🛍 Paying for ${escapeMd(sanitizeText(url, 80))}…\n\n_Probing the 402 endpoint…_`, {
     parse_mode: 'Markdown',
   });
 
@@ -136,14 +138,14 @@ export async function useServiceCommand(ctx, args) {
     const payload = response.output?.value ?? response.output ?? {};
     const svcResponse = payload.response ?? payload;
     const status = svcResponse.status ?? 200;
-    const contentType = svcResponse.content_type || 'text/plain';
+    const contentType = escapeMd(sanitizeText(svcResponse.content_type || 'text/plain', 40));
     const bodyText = typeof svcResponse.body === 'string' ? svcResponse.body : JSON.stringify(svcResponse.body ?? {});
 
     await ctx.telegram.editMessageText(
       ctx.chat.id,
       progress.message_id,
       undefined,
-      `✅ **Paid response received**\n\nHTTP ${status} · ${sanitizeText(contentType, 40)}\n\n\`\`\`\n${truncateUtf8(sanitizeText(bodyText, 3500), 3500)}\n\`\`\``,
+      `✅ **Paid response received**\n\nHTTP ${status} · ${contentType}\n\n\`\`\`\n${truncateUtf8(sanitizeText(bodyText, 3500), 3500)}\n\`\`\``,
       { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } }
     );
     ctx.stats?.hit('service_used');

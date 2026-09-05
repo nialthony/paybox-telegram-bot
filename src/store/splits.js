@@ -15,6 +15,10 @@ import { JsonFileStore } from './jsonFile.js';
  * participant (the payer) absorbs any indivisible remainder dust, and
  * non-payer shares are always ≤ 9 decimals so they remain executable by
  * /transfer input validation.
+ *
+ * Security (v2.1.1):
+ *  - Payer identity is bound to immutable Telegram user id (createdBy / payer.userId),
+ *    not mutable username. Usernames are display-only.
  */
 
 const SHARE_SCALE = 9; // decimals of share precision (micro units)
@@ -60,9 +64,23 @@ export class SplitsStore {
 
   /**
    * Create a split. participants: [{ handle, address }] — the payer
-   * (creator) is prepended automatically and absorbs division dust.
+   * (creator) is appended last and absorbs division dust.
+   * payerUserId is immutable Telegram user id of payer (for authz).
+   * payerAddress is optional wallet address of payer at creation time (for secure settlement).
    */
-  create({ chatId, createdBy, payerHandle, description, totalAmount, tokenSymbol, chainKey, chainLabel, participants }) {
+  create({
+    chatId,
+    createdBy,
+    payerHandle,
+    payerUserId,
+    payerAddress,
+    description,
+    totalAmount,
+    tokenSymbol,
+    chainKey,
+    chainLabel,
+    participants,
+  }) {
     if (!Array.isArray(participants) || participants.length === 0) {
       throw new Error('split needs at least one other participant');
     }
@@ -71,9 +89,8 @@ export class SplitsStore {
     }
 
     const totalMicro = amountToMicro(totalAmount);
-    const everyone = [{ handle: payerHandle, address: null, isPayer: true }, ...participants];
     // The payer sits last in the share list so they absorb the dust.
-    const ordered = [...participants, { handle: payerHandle, address: null, isPayer: true }];
+    const ordered = [...participants, { handle: payerHandle, address: payerAddress ?? null, isPayer: true, userId: payerUserId ?? createdBy ?? null }];
     const shares = splitEvenly(totalMicro, ordered.length);
 
     let id = null;
@@ -91,11 +108,16 @@ export class SplitsStore {
         tokenSymbol,
         chainKey,
         chainLabel,
-        payer: { handle: payerHandle },
+        payer: {
+          handle: payerHandle,
+          userId: payerUserId ?? createdBy ?? null,
+          address: payerAddress ?? null,
+        },
         participants: ordered.map((p, i) => ({
           handle: p.handle,
           address: p.address ?? null,
           isPayer: Boolean(p.isPayer),
+          userId: p.userId ?? (p.isPayer ? (payerUserId ?? createdBy ?? null) : null),
           shareMicro: shares[i].toString(),
           paid: null,
         })),
@@ -118,6 +140,11 @@ export class SplitsStore {
   participant(split, handle) {
     const normalized = String(handle || '').toLowerCase().replace(/^@/, '');
     return split.participants.find((p) => String(p.handle || '').toLowerCase().replace(/^@/, '') === normalized) ?? null;
+  }
+
+  participantByUserId(split, userId) {
+    if (!userId) return null;
+    return split.participants.find((p) => p.userId && p.userId === userId) ?? null;
   }
 
   /** Mark a participant as settled (how: 'transfer' | 'external'). */

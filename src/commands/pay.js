@@ -2,7 +2,7 @@ import { UsageError } from '../middleware/index.js';
 import { requireCard } from './shared.js';
 import { requestArtifact } from '../paybox/client.js';
 import { parseUsd, isUrl, sanitizeText } from '../utils/validate.js';
-import { formatCents } from '../utils/format.js';
+import { formatCents, escapeMd } from '../utils/format.js';
 import { logger } from '../logger.js';
 
 const SLEEP = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -14,6 +14,8 @@ const SLEEP = (ms) => new Promise((r) => setTimeout(r, ms));
  * This does NOT complete the merchant checkout — it issues the card details
  * the user then enters at the merchant's site. For passkey-approved payments
  * the card is claimed once via `claim_payment_credentials`.
+ *
+ * Security (v2.1.1): merchant name is escaped for Markdown.
  */
 export async function payCommand(ctx, args) {
   if (args.length < 3) {
@@ -29,6 +31,7 @@ export async function payCommand(ctx, args) {
 
   const [merchantRaw, url, usdRaw] = args;
   const merchant = sanitizeText(merchantRaw, 80);
+  const merchantEsc = escapeMd(merchant);
   const amountCents = parseUsd(usdRaw);
 
   if (!isUrl(url)) {
@@ -41,7 +44,7 @@ export async function payCommand(ctx, args) {
   const card = await requireCard(ctx);
 
   const statusMsg = await ctx.reply(
-    `💳 **Preparing payment**\n\nMerchant: ${merchant}\nAmount: ${formatCents(amountCents)}\n\n_Authorizing card issuance…_`,
+    `💳 **Preparing payment**\n\nMerchant: ${merchantEsc}\nAmount: ${formatCents(amountCents)}\n\n_Authorizing card issuance…_`,
     { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } }
   );
   const edit = (text, extra) =>
@@ -59,7 +62,7 @@ export async function payCommand(ctx, args) {
     if (request.status === 'pending_approval') {
       const approval = approvalUrl(request);
       await edit(
-        `🔐 **Approve payment**\n\nMerchant: ${merchant}\nAmount: ${formatCents(amountCents)}\n\nApprove with your passkey in Paybox, then I’ll fetch the card details.`,
+        `🔐 **Approve payment**\n\nMerchant: ${merchantEsc}\nAmount: ${formatCents(amountCents)}\n\nApprove with your passkey in Paybox, then I’ll fetch the card details.`,
         {
           parse_mode: 'Markdown',
           reply_markup: { inline_keyboard: [[{ text: '✅ Approve in Paybox', url: approval }]] },
@@ -89,11 +92,11 @@ export async function payCommand(ctx, args) {
 
     await edit(
       `✅ **Virtual card issued**\n\n` +
-        `Merchant: ${merchant}\n` +
+        `Merchant: ${merchantEsc}\n` +
         `Amount available: ${formatCents(amountCents)}\n` +
         `Expires: ${cardDetails?.expires_at ? new Date(cardDetails.expires_at).toLocaleString() : 'one-time use'}\n\n` +
         `Card: \`${maskCard(cardDetails)}\`\n\n` +
-        `_Use these details at ${merchant}'s checkout. The card is one-time and merchant-locked. I won't mark the purchase complete until the merchant confirms it._`,
+        `_Use these details at ${merchantEsc}'s checkout. The card is one-time and merchant-locked. I won't mark the purchase complete until the merchant confirms it._`,
       {
         parse_mode: 'Markdown',
         link_preview_options: { is_disabled: true },

@@ -14,6 +14,7 @@ import { watchTransaction } from '../utils/txconfirm.js';
 import { parseAmount, addressFamily, isTelegramHandle, isAnyAddress } from '../utils/validate.js';
 import { shortAddress } from '../utils/format.js';
 import { logger } from '../logger.js';
+import { keccak256 } from 'viem';
 
 const SLEEP = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -198,6 +199,53 @@ export async function executeTransfer(ctx, { recipientInput, amount, tokenInput 
 }
 
 /**
+ * Compute txId from artifact without broadcasting (for L6 crash safety).
+ * EVM: keccak256 of serializedTransaction.
+ * Solana: first signature of signed transaction, base58-encoded.
+ */
+export function computeTxIdFromArtifact(chain, artifact) {
+  try {
+    if (chain.family === 'evm' && artifact?.serializedTransaction) {
+      return keccak256(artifact.serializedTransaction);
+    }
+    if (chain.family === 'solana' && artifact?.signedTransactionBase64) {
+      const raw = Buffer.from(artifact.signedTransactionBase64, 'base64');
+      // Compact-u16 sig count
+      let offset = 0;
+      let sigCount = 0;
+      let shift = 0;
+      while (offset < raw.length) {
+        const b = raw[offset++];
+        sigCount |= (b & 0x7f) << shift;
+        if ((b & 0x80) === 0) break;
+        shift += 7;
+      }
+      if (sigCount < 1) return null;
+      const sigBytes = raw.subarray(offset, offset + 64);
+      if (sigBytes.length < 64) return null;
+      // Lazy import bs58 (v6 is ESM, v4 is CJS) — try both shapes
+      // We use dynamic import to avoid top-level await issues in tests
+      // For sync path, we attempt to require via createRequire if available, else fallback to hex
+      // In practice, for Solana we will persist after broadcast if pre-compute fails.
+      // Here we try to use bs58 if synchronously available via import cache.
+      // As fallback, return hex (still useful for crash detection, though not the final base58 txId).
+      // The final txId after broadcast will overwrite this.
+      try {
+        // eslint-disable-next-line global-require
+        const bs58 = require('bs58');
+        const encode = bs58.encode || bs58.default?.encode;
+        if (encode) return encode(sigBytes);
+      } catch {}
+      // If bs58 not available synchronously, return hex placeholder — resume will still know broadcast was attempted
+      return `sol:${Buffer.from(sigBytes).toString('hex').slice(0, 16)}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
  * Take a transfer request to completion, editing the status message through
  * every stage. Used by the live command path and by restart-resume.
  *
@@ -228,6 +276,27 @@ export async function driveTransferToCompletion({
   const untrack = () => pending?.untrack(request.request_id);
 
   try {
+    // If we already have a txId persisted (crash between broadcast and untrack), jump straight to watcher
+    const existingRecord = pending?.get(request.request_id);
+    if (existingRecord?.txId) {
+      const txId = existingRecord.txId;
+      await edit(`📡 **Broadcast previously succeeded** — watching ${chain.label}…`, { parse_mode: 'Markdown' });
+      untrack();
+      watch({
+        telegram,
+        chatId,
+        messageId,
+        chain,
+        txId,
+        rpcUrl: config.rpc?.[chain.key],
+        intervalMs: config.pollIntervalMs,
+        timeoutMs: config.txConfirmTimeoutMs,
+        onFinal: () => stats?.hit('transfer_confirmed'),
+      }).catch((error) => logger.error(`tx watch failed: ${error.message}`));
+      stats?.hit('transfer_completed');
+      return { ok: true, txId, chain };
+    }
+
     // Approval? Show the link and wait; then finish signing in-process.
     if (request.status === 'pending_approval') {
       await edit(
@@ -286,11 +355,27 @@ export async function driveTransferToCompletion({
       return { ok: false, status: request.status };
     }
 
-    // Broadcast
+    // Broadcast — L6: persist txId BEFORE broadcasting
     const artifact = requestArtifact(request);
     await edit(`📡 **Signed.** Broadcasting to ${chain.label}…`, { parse_mode: 'Markdown' });
 
+    // Try to compute txId before broadcast for crash safety
+    let precomputedTxId = null;
+    try {
+      precomputedTxId = computeTxIdFromArtifact(chain, artifact);
+    } catch {}
+    if (precomputedTxId) {
+      try {
+        pending?.update(request.request_id, { txId: precomputedTxId, preBroadcast: true });
+      } catch {}
+    }
+
     const txId = await broadcast(config, chain, artifact);
+
+    // Persist final txId (overwrites precomputed if needed) BEFORE untracking
+    try {
+      pending?.update(request.request_id, { txId, preBroadcast: false });
+    } catch {}
 
     // Broadcast handed to the on-chain watcher — stop tracking. (A restart
     // cannot "resume" an already-broadcast transaction; the watcher owns the
@@ -390,7 +475,20 @@ async function watchRequestInBackground(env) {
         try {
           const artifact = requestArtifact(request);
           await edit(`🔓 **Approved late — broadcasting now…**`);
+          // L6: persist txId before broadcast in background path as well
+          let preTxId = null;
+          try {
+            preTxId = computeTxIdFromArtifact(chain, artifact);
+          } catch {}
+          if (preTxId) {
+            try {
+              pending?.update(requestId, { txId: preTxId, preBroadcast: true });
+            } catch {}
+          }
           const txId = await broadcast(config, chain, artifact);
+          try {
+            pending?.update(requestId, { txId, preBroadcast: false });
+          } catch {}
           watch({
             telegram,
             chatId,

@@ -11,6 +11,8 @@ import { isAnyAddress, isTelegramHandle } from '../utils/validate.js';
  */
 
 export class Registry {
+  static FORBIDDEN_HANDLES = new Set(['__proto__', 'constructor', 'prototype']);
+
   constructor({ dir }) {
     this.store = new JsonFileStore({
       dir,
@@ -26,6 +28,9 @@ export class Registry {
 
   add({ handle, address, addedBy, alias }) {
     const normalized = String(handle).toLowerCase().replace(/^@/, '');
+    if (Registry.FORBIDDEN_HANDLES.has(normalized)) {
+      throw new Error(`"${handle}" is not allowed as a registry handle.`);
+    }
     if (!isTelegramHandle(`@${normalized}`)) {
       throw new Error(`"${handle}" is not a valid Telegram handle.`);
     }
@@ -33,6 +38,9 @@ export class Registry {
       throw new Error(`"${address}" is not a valid wallet address.`);
     }
     this.store.mutate((data) => {
+      if (Registry.FORBIDDEN_HANDLES.has(normalized)) {
+        throw new Error(`"${handle}" is not allowed as a registry handle.`);
+      }
       data.users[normalized] = {
         handle: normalized,
         address,
@@ -46,9 +54,12 @@ export class Registry {
 
   remove(handle) {
     const normalized = String(handle).toLowerCase().replace(/^@/, '');
+    if (Registry.FORBIDDEN_HANDLES.has(normalized)) {
+      throw new Error(`"${handle}" is not allowed as a registry handle.`);
+    }
     let removed = null;
     this.store.mutate((data) => {
-      removed = data.users[normalized] ?? null;
+      removed = Object.prototype.hasOwnProperty.call(data.users, normalized) ? data.users[normalized] : null;
       delete data.users[normalized];
     });
     return removed;
@@ -56,7 +67,9 @@ export class Registry {
 
   byHandle(handle) {
     const normalized = String(handle).toLowerCase().replace(/^@/, '');
-    return this.entries()[normalized] ?? null;
+    if (Registry.FORBIDDEN_HANDLES.has(normalized)) return null;
+    const users = this.entries();
+    return Object.prototype.hasOwnProperty.call(users, normalized) ? users[normalized] : null;
   }
 
   byAddress(address) {

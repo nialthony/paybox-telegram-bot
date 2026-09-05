@@ -20,13 +20,20 @@ Telegram pushes updates to your HTTPS endpoint.
 
 ```env
 BOT_WEBHOOK_URL=https://bot.example.com
-BOT_WEBHOOK_PATH=/webhook
+BOT_WEBHOOK_PATH=/webhook-<random>   # randomize to reduce probing
+BOT_WEBHOOK_SECRET=your_long_random_secret_here  # REQUIRED — see below
 BOT_PORT=3000
 ```
 
-The bot serves `/webhook` plus a `/healthz` endpoint that reports `{ ok, paybox, signing, agent, pollers, uptime }`. On startup it calls `setWebhook` automatically after the server is listening.
+The bot serves `/webhook` (or your randomized path) plus a `/healthz` endpoint that reports `{ ok, paybox, signing, agent, pollers, uptime }`. On startup it calls `setWebhook` automatically after the server is listening.
 
 > Telegram requires a **valid TLS certificate** for webhook URLs. Front the bot with Caddy (automatic HTTPS) or nginx.
+
+**Webhook security (v2.1.1+):**
+
+- `BOT_WEBHOOK_SECRET` is **required** in webhook mode. The bot passes it as Telegraf's `secretToken` launch option; Telegram then sends `X-Telegram-Bot-Api-Secret-Token` on every webhook call and Telegraf verifies it. Without it the bot **refuses to start** in webhook mode — this prevents webhook forgery.
+- Randomize `BOT_WEBHOOK_PATH` (e.g. `/webhook-a1b2c3d4...`) — the bot logs a warning when the path is the default `/webhook`. The secret token is the real protection, but a non-guessable path reduces probing.
+- Generate a secret with `openssl rand -hex 32` (32+ chars, alphanumeric + `-_`, max 256 chars per Telegram spec).
 
 #### Caddy example
 
@@ -100,10 +107,11 @@ journalctl -u paybox-bot -f
 - **Secrets**: `.env` is gitignored. `PAYBOX_SIGNING_KEY` and `OPENAI_API_KEY` never appear in logs (redaction is built in). Never pass the signing key as a CLI argument.
 - **Data**: `DATA_DIR` holds `registry.json` (address book) and `stats.json`. Back up or mount it. Writes are atomic (temp file + rename).
 - **Approvals**: passkey approvals time out after `REQUEST_TIMEOUT_MS` (default 5 min). Long-running swaps keep being watched in the background for 15 minutes.
-- **Owner lock**: set `OWNER_TELEGRAM_ID` (numeric user id) to make this a single-user bot. Get your id from `@userinfobot`.
+- **Owner lock**: set `OWNER_TELEGRAM_ID` (numeric user id) to make this a single-user bot. Get your id from `@userinfobot`. When unset, the bot logs a loud warning and **blocks money + sensitive commands** (transfer, swap, pay, use_service, sign, secret, split settle, schedule) unless you explicitly set `PAYBOX_OPEN_MODE=1` to acknowledge the risk. Read-only commands (balance, markets, help…) stay open.
 - **Rate limiting**: per-user token bucket (12 msgs / 10 s burst, refill 1.2/s) protects against accidental spam.
 - **Health**: `GET /healthz` → `200 {"ok":true,...}` in webhook mode; Docker HEALTHCHECK uses it.
 - **Shutdown**: SIGINT/SIGTERM stop polling gracefully, cancel active request-pollers and flush stats. Deploys that kill with SIGKILL may lose the last few stats ticks — that's all.
+- **Webhook secret**: `BOT_WEBHOOK_SECRET` is mandatory in webhook mode (see above). Use `openssl rand -hex 32`.
 
 ## Upgrading Paybox access
 
