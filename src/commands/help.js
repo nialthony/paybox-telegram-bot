@@ -14,6 +14,7 @@ const SECTIONS = [
       ['/transfer <addr|@user> <amount> <token>', 'Send crypto on-chain (ETH, Base ETH, SOL)'],
       ['/swap <token> <token> <amount>', 'Swap or bridge tokens'],
       ['/pay <merchant> <url> <usd>', 'Pay a merchant with a one-time virtual card'],
+      ['/split <amount> <token> <what> @a @b', 'Group expense splitter — balances + settle via /transfer'],
       ['/sign <message>', 'Sign a message with your wallet'],
       ['/secret <name>', 'Reveal a secret credential (API keys, …)'],
     ],
@@ -39,6 +40,14 @@ const SECTIONS = [
       ['/stats', 'Bot usage counters'],
     ],
   },
+  {
+    title: '⏰ Automation',
+    rows: [
+      ['/schedule add every 6h /price ETH', 'Run a command on an interval (approvals still apply)'],
+      ['/schedule add daily 09:00 /balance', 'Run a command daily at a set time (SCHEDULER_TZ)'],
+      ['/schedule list · pause · resume · cancel', 'Manage scheduled jobs'],
+    ],
+  },
 ];
 
 export async function helpCommand(ctx) {
@@ -51,7 +60,7 @@ export async function helpCommand(ctx) {
     lines.push('');
   }
   lines.push(
-    '🧠 **AI mode**: when OPENAI_API_KEY is set, just chat — “send 5 USDC to @alice”, “how much ETH do I have?”, “any markets on the Fed decision?”',
+    '🧠 **AI mode**: when OPENAI_API_KEY is set, just chat — “send 5 USDC to @alice”, “how much ETH do I have?”, “any markets on the Fed decision?”. Money moves always ask for a one-tap ✅ confirmation first.',
     '',
     '🔐 All money operations are passkey-approved or run inside your Paybox grant. Audit log: app.paybox.sh'
   );

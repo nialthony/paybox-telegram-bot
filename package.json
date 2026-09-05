@@ -1,6 +1,6 @@
 {
   "name": "paybox-telegram-bot",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Telegram bot powered by Paybox - the non-custodial wallet for AI agents. Payments, transfers, swaps, x402 services and prediction markets, all from Telegram.",
   "main": "src/index.js",
   "type": "module",
